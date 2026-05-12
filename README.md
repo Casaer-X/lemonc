@@ -4,6 +4,8 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.95%2B-orange.svg)](https://www.rust-lang.org)
 
+English | [简体中文](README.zh-CN.md)
+
 > The official compiler and JIT runtime for the Lemon programming language.
 
 `lemonc` is a complete compiler toolchain for Lemon, featuring multi-target code generation, a JIT runtime, and a project build system.
