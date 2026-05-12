@@ -1,0 +1,12 @@
+[package]
+name = "lemonc"
+version = "1.0.0"
+edition = "2021"
+
+[[bin]]
+name = "lemonc"
+path = "src/main.rs"
+
+[[bin]]
+name = "lemonvm"
+path = "src/bin/lemonvm.rs"
