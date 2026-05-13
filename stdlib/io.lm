@@ -1,0 +1,38 @@
+// @compile target=library
+// Lemon Standard Library - I/O Module
+
+package io;
+
+public class Console {
+    public static void print(String msg) {
+        printf("%s", msg);
+    }
+
+    public static void println(String msg) {
+        printf("%s\n", msg);
+    }
+
+    public static void printInt(int value) {
+        printf("%d", value);
+    }
+
+    public static void printDouble(double value) {
+        printf("%f", value);
+    }
+
+    public static void printBool(bool value) {
+        if (value) {
+            printf("true");
+        } else {
+            printf("false");
+        }
+    }
+
+    public static void printChar(int c) {
+        printf("%c", c);
+    }
+
+    public static void newLine() {
+        printf("\n");
+    }
+}

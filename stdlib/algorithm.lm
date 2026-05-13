@@ -1,0 +1,200 @@
+// @compile target=library
+// Lemon Standard Library - Algorithm Module
+
+package algorithm;
+
+public class Sort {
+    public static void bubbleSortInt(Array<int> arr) {
+        int n = arr.size();
+        for (int i = 0; i < n - 1; i = i + 1) {
+            for (int j = 0; j < n - i - 1; j = j + 1) {
+                if (arr.get(j) > arr.get(j + 1)) {
+                    int temp = arr.get(j);
+                    arr.set(j, arr.get(j + 1));
+                    arr.set(j + 1, temp);
+                }
+            }
+        }
+    }
+
+    public static void selectionSortInt(Array<int> arr) {
+        int n = arr.size();
+        for (int i = 0; i < n - 1; i = i + 1) {
+            int minIdx = i;
+            for (int j = i + 1; j < n; j = j + 1) {
+                if (arr.get(j) < arr.get(minIdx)) {
+                    minIdx = j;
+                }
+            }
+            int temp = arr.get(i);
+            arr.set(i, arr.get(minIdx));
+            arr.set(minIdx, temp);
+        }
+    }
+
+    public static void insertionSortInt(Array<int> arr) {
+        int n = arr.size();
+        for (int i = 1; i < n; i = i + 1) {
+            int key = arr.get(i);
+            int j = i - 1;
+            while (j >= 0 && arr.get(j) > key) {
+                arr.set(j + 1, arr.get(j));
+                j = j - 1;
+            }
+            arr.set(j + 1, key);
+        }
+    }
+}
+
+public class Search {
+    public static int linearSearchInt(Array<int> arr, int target) {
+        int n = arr.size();
+        for (int i = 0; i < n; i = i + 1) {
+            if (arr.get(i) == target) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public static int binarySearchInt(Array<int> arr, int target) {
+        int left = 0;
+        int right = arr.size() - 1;
+        while (left <= right) {
+            int mid = left + right;
+            mid = mid / 2;
+            int midVal = arr.get(mid);
+            if (midVal == target) {
+                return mid;
+            }
+            if (midVal < target) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+        return -1;
+    }
+
+    public static int maxInt(Array<int> arr) {
+        int n = arr.size();
+        if (n == 0) return 0;
+        int max = arr.get(0);
+        for (int i = 1; i < n; i = i + 1) {
+            int val = arr.get(i);
+            if (val > max) {
+                max = val;
+            }
+        }
+        return max;
+    }
+
+    public static int minInt(Array<int> arr) {
+        int n = arr.size();
+        if (n == 0) return 0;
+        int min = arr.get(0);
+        for (int i = 1; i < n; i = i + 1) {
+            int val = arr.get(i);
+            if (val < min) {
+                min = val;
+            }
+        }
+        return min;
+    }
+
+    public static int maxIndexInt(Array<int> arr) {
+        int n = arr.size();
+        if (n == 0) return -1;
+        int maxIdx = 0;
+        for (int i = 1; i < n; i = i + 1) {
+            if (arr.get(i) > arr.get(maxIdx)) {
+                maxIdx = i;
+            }
+        }
+        return maxIdx;
+    }
+
+    public static int minIndexInt(Array<int> arr) {
+        int n = arr.size();
+        if (n == 0) return -1;
+        int minIdx = 0;
+        for (int i = 1; i < n; i = i + 1) {
+            if (arr.get(i) < arr.get(minIdx)) {
+                minIdx = i;
+            }
+        }
+        return minIdx;
+    }
+}
+
+public class ArrayUtils {
+    public static void reverseInt(Array<int> arr) {
+        int left = 0;
+        int right = arr.size() - 1;
+        while (left < right) {
+            int temp = arr.get(left);
+            arr.set(left, arr.get(right));
+            arr.set(right, temp);
+            left = left + 1;
+            right = right - 1;
+        }
+    }
+
+    public static void fillInt(Array<int> arr, int value) {
+        int n = arr.size();
+        for (int i = 0; i < n; i = i + 1) {
+            arr.set(i, value);
+        }
+    }
+
+    public static Array<int> copyInt(Array<int> arr) {
+        Array<int> result = new Array();
+        int n = arr.size();
+        for (int i = 0; i < n; i = i + 1) {
+            result.add(arr.get(i));
+        }
+        return result;
+    }
+
+    public static int sumInt(Array<int> arr) {
+        int total = 0;
+        int n = arr.size();
+        for (int i = 0; i < n; i = i + 1) {
+            total = total + arr.get(i);
+        }
+        return total;
+    }
+
+    public static double averageInt(Array<int> arr) {
+        int n = arr.size();
+        if (n == 0) return 0.0;
+        return (double)ArrayUtils.sumInt(arr) / n;
+    }
+
+    public static bool containsInt(Array<int> arr, int value) {
+        return Search.linearSearchInt(arr, value) >= 0;
+    }
+
+    public static int countInt(Array<int> arr, int value) {
+        int count = 0;
+        int n = arr.size();
+        for (int i = 0; i < n; i = i + 1) {
+            if (arr.get(i) == value) {
+                count = count + 1;
+            }
+        }
+        return count;
+    }
+
+    public static Array<int> uniqueInt(Array<int> arr) {
+        Array<int> result = new Array();
+        int n = arr.size();
+        for (int i = 0; i < n; i = i + 1) {
+            int val = arr.get(i);
+            if (!ArrayUtils.containsInt(result, val)) {
+                result.add(val);
+            }
+        }
+        return result;
+    }
+}

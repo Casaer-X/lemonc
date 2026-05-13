@@ -179,7 +179,7 @@ pub enum Stmt {
     Block(Block),
     Expr(Expr),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
-    For(Option<Expr>, Option<Expr>, Option<Expr>, Box<Stmt>),
+    For(Option<Box<Stmt>>, Option<Expr>, Option<Expr>, Box<Stmt>),
     While(Expr, Box<Stmt>),
     Return(Option<Expr>),
     Break,
@@ -275,9 +275,6 @@ impl TryFrom<TokenKind> for BinaryOp {
 }
 
 pub fn mangle_method_name(class_name: &str, method_name: &str, params: &[Param]) -> String {
-    if method_name == "main" && class_name == "App" && params.is_empty() {
-        return "main".to_string();
-    }
     let mut mangled = format!("{}_{}", class_name, method_name);
     for p in params {
         mangled.push('_');

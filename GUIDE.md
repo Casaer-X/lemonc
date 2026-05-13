@@ -599,10 +599,10 @@ import <path> as <alias>;
 
 ### 主类（Entry Point）
 
-Lemon 程序**必须包含一个名为 `App` 的主类**，其中包含 `main` 方法作为程序入口：
+Lemon 程序必须包含一个含有 `main` 方法的类作为程序入口，主类名没有限制，不必为 `App`：
 
 ```
-public class App {
+public class MyApp {
     public static void main(String[] args) {
         // 程序入口
     }
@@ -613,12 +613,12 @@ public class App {
 
 | 规则 | 说明 |
 |------|------|
-| 类名 | 必须是 `App` |
+| 类名 | 任意合法类名 |
 | 方法名 | 必须是 `main` |
 | 方法签名 | `public static void main(String[] args)` |
 | 位置 | 可以在任何包中，但通常放在 `main` 包 |
 
-编译器会自动查找 `App` 类中的 `main` 方法作为程序入口点。如果没有找到 `App` 类或 `main` 方法，编译会失败。
+编译器会自动查找含有 `public static void main(String[] args)` 方法的类作为程序入口点。如果没有找到 `main` 方法，编译会失败。
 
 ### 默认访问权限
 
@@ -975,6 +975,59 @@ TypeInfo* t = type_of(obj);
 printf("Type: %s\n", t->name);
 ```
 
+### 方法访问规则
+
+Lemon 遵循 Java 风格的方法访问规范：
+
+| 调用场景 | 语法格式 | 示例 |
+|----------|----------|------|
+| 调用其他类的静态方法 | `类名.方法名(参数)` | `Math.abs(-42)` |
+| 调用本类的静态方法 | `类名.方法名(参数)` | `Calculator.add(1, 2)` |
+| 调用实例方法 | `对象.方法名(参数)` | `obj.greet()` |
+| 在类内部调用实例方法 | `this.方法名(参数)` | `this.getValue()` |
+| 在类内部调用本类静态方法 | `类名.方法名(参数)` | `MyClass.helper()` |
+
+**禁止裸方法调用**：在类内部调用方法时，不允许省略前缀。必须使用 `this.方法名()` 或 `类名.方法名()` 的格式。
+
+```
+// 错误：裸方法调用
+public class Calculator {
+    public static int add(int a, int b) { return a + b; }
+    public static void test() {
+        int result = add(1, 2);  // 编译错误！
+    }
+}
+
+// 正确：使用类名前缀
+public class Calculator {
+    public static int add(int a, int b) { return a + b; }
+    public static void test() {
+        int result = Calculator.add(1, 2);  // 正确
+    }
+}
+```
+
+**实例方法调用**：
+
+```
+public class Person {
+    private String name;
+
+    public Person(String name) {
+        this.name = name;
+    }
+
+    public void greet() {
+        printf("Hello, I'm %s\n", this.name);  // this. 访问字段
+    }
+
+    public void introduce() {
+        this.greet();  // this. 调用实例方法
+        printf("Nice to meet you!\n");
+    }
+}
+```
+
 ## 3.7 接口
 
 ### 接口声明
@@ -1170,6 +1223,13 @@ String upper = msg.toUpperCase(); // "HELLO, LEMON!"
 int idx = msg.indexOf("Lemon");   // 7
 ```
 
+**静态方法调用**：内建类型的静态方法需要使用类名前缀调用，例如 `String.intToString(42)` 将整数转换为字符串：
+
+```
+String numStr = String.intToString(42);  // "42"
+int value = String.toInt("123");         // 123
+```
+
 ### Array 方法
 
 Array 在 C 层面映射为 `LemonArray*`，提供以下内建方法：
@@ -1308,7 +1368,7 @@ public class Greeter {
     }
 }
 
-public class App {
+public class HelloApp {  // 主类名可以是任意合法类名，不必为 App
     public static void main(String[] args) {
         Greeter g = new Greeter("Hello, Lemon!");
         g.sayHello();
@@ -1346,7 +1406,7 @@ public class LoudGreeter extends Greeter {
     }
 }
 
-public class App {
+public class App {  // 使用 App 作为主类名只是惯例，不是强制要求
     public static void main(String[] args) {
         Greeter g = new Greeter("Hello, Lemon!");
         g.sayHello();
@@ -1377,7 +1437,7 @@ interface Runnable {
     void run();
 }
 
-public class App implements Runnable {
+public class App implements Runnable {  // 使用 App 作为主类名只是惯例，不是强制要求
     @override
     public void run() {
         printf("App is running\n");
@@ -1496,7 +1556,7 @@ public class Calculator {
     }
 }
 
-public class App {
+public class App {  // 使用 App 作为主类名只是惯例，不是强制要求
     public static void main(String[] args) {
         Calculator calc = new Calculator();
         int sum2 = calc.add(3, 5);
@@ -1534,7 +1594,7 @@ public class Person {
     }
 }
 
-public class App {
+public class App {  // 使用 App 作为主类名只是惯例，不是强制要求
     public static void main(String[] args) {
         Person p = new Person("Alice", 25);
         p.greet();
@@ -1568,7 +1628,7 @@ public class Calculator {
     }
 }
 
-public class App {
+public class App {  // 使用 App 作为主类名只是惯例，不是强制要求
     public static void main(String[] args) {
         int x = Calculator.add(10, 20);
         int y = Calculator.multiply(5, 6);

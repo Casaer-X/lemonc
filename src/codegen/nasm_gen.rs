@@ -78,20 +78,18 @@ impl NasmCodeGen {
 
         for decl in &ast.declarations {
             if let Declaration::Class(class) = decl {
-                if class.name == "App" {
-                    for member in &class.members {
-                        if let ClassMember::Method(method) = member {
-                            if method.name == "main" {
-                                let mangled = mangle_method_name(&class.name, &method.name, &method.params);
-                                self.emit_line("global main");
-                                self.emit_line("");
-                                self.emit_line("main:");
-                                self.emit_prologue(32);
-                                self.emit_line("    mov rcx, 0");
-                                self.emit_line(&format!("    call {}", mangled));
-                                self.emit_line("    xor rax, rax");
-                                self.emit_epilogue();
-                            }
+                for member in &class.members {
+                    if let ClassMember::Method(method) = member {
+                        if method.name == "main" && method.modifiers.iter().any(|m| matches!(m, MethodModifier::Static)) {
+                            let mangled = mangle_method_name(&class.name, &method.name, &method.params);
+                            self.emit_line("global main");
+                            self.emit_line("");
+                            self.emit_line("main:");
+                            self.emit_prologue(32);
+                            self.emit_line("    mov rcx, 0");
+                            self.emit_line(&format!("    call {}", mangled));
+                            self.emit_line("    xor rax, rax");
+                            self.emit_epilogue();
                         }
                     }
                 }
@@ -542,8 +540,8 @@ impl NasmCodeGen {
                 let start_label = self.new_label();
                 let end_label = self.new_label();
 
-                if let Some(init_expr) = init {
-                    self.gen_expr_to_rax(init_expr);
+                if let Some(stmt) = init {
+                    self.generate_stmt(stmt.as_ref());
                 }
 
                 self.emit_line(&format!("{}:", start_label));

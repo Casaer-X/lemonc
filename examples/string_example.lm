@@ -1,0 +1,89 @@
+// @compile target=exe
+// Lemon 示例 - 字符串操作
+
+package examples;
+
+public class StringExample {
+    public static void main(String[] args) {
+        printf("=== 字符串操作示例 ===\n\n");
+
+        // 1. 字符串赋值与输出
+        printf("1. 字符串赋值与输出:\n");
+        String greeting = "Hello, Lemon!";
+        printf("   字符串: %s\n", greeting);
+        printf("   长度: %d\n\n", greeting.length());
+
+        // 2. 字符串拼接
+        printf("2. 字符串拼接:\n");
+        String first = "Hello";
+        String second = "World";
+        String combined = first.concat(" ").concat(second);
+        printf("   \"%s\" + \" \" + \"%s\" = \"%s\"\n\n", first, second, combined);
+
+        // 3. 子串提取
+        printf("3. 子串提取:\n");
+        String text = "Hello, World!";
+        printf("   原始: %s\n", text);
+        printf("   子串(0, 5): %s\n", text.substring(0, 5));
+        printf("   子串(7, 12): %s\n\n", text.substring(7, 12));
+
+        // 4. 字符查找
+        printf("4. 字符查找:\n");
+        printf("   indexOf(\"W\"): %d\n", text.indexOf("W"));
+        printf("   indexOf(\"o\"): %d\n", text.indexOf("o"));
+        printf("   lastIndexOf(\"o\"): %d\n\n", text.lastIndexOf("o"));
+
+        // 5. 包含判断
+        printf("5. 包含判断:\n");
+        printf("   contains(\"World\"): %d\n", text.contains("World"));
+        printf("   contains(\"Earth\"): %d\n\n", text.contains("Earth"));
+
+        // 6. 前缀和后缀
+        printf("6. 前缀和后缀:\n");
+        printf("   startsWith(\"Hello\"): %d\n", text.startsWith("Hello"));
+        printf("   startsWith(\"Hi\"): %d\n", text.startsWith("Hi"));
+        printf("   endsWith(\"!\"): %d\n", text.endsWith("!"));
+        printf("   endsWith(\"?\"): %d\n\n", text.endsWith("?"));
+
+        // 7. 大小写转换
+        printf("7. 大小写转换:\n");
+        String lower = text.toLowerCase();
+        String upper = text.toUpperCase();
+        printf("   小写: %s\n", lower);
+        printf("   大写: %s\n\n", upper);
+
+        // 8. 去除空白
+        printf("8. 去除空白:\n");
+        String spaced = "   Hello   ";
+        String trimmed = spaced.trim();
+        printf("   原始: \"%s\"\n", spaced);
+        printf("   去空白: \"%s\"\n\n", trimmed);
+
+        // 9. 替换
+        printf("9. 替换:\n");
+        String replaced = text.replace("World", "Lemon");
+        printf("   原始: %s\n", text);
+        printf("   替换后: %s\n\n", replaced);
+
+        // 10. 比较
+        printf("10. 字符串比较:\n");
+        String s1 = "Apple";
+        String s2 = "Banana";
+        printf("   \"%s\" vs \"%s\": %d\n", s1, s2, s1.compareTo(s2));
+        printf("   \"%s\" equals \"%s\": %d\n\n", s1, s1, s1.equals(s1));
+
+        // 11. 整数转字符串
+        printf("11. 整数转字符串:\n");
+        int num = 12345;
+        String numStr = String.intToString(num);
+        printf("   String.intToString(%d) = \"%s\"\n\n", num, numStr);
+
+        // 12. 字符串转整数
+        printf("12. 字符串转整数:\n");
+        String parseStr = "9876";
+        int parsed = parseStr.toInt();
+        printf("   \"%s\".toInt() = %d\n\n", parseStr, parsed);
+
+        printf("=== 示例结束 ===\n");
+    }
+}

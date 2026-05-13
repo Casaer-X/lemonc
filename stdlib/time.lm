@@ -1,0 +1,59 @@
+// @compile target=library
+// Lemon Standard Library - Time Module
+
+package time;
+
+public class Time {
+    public static final int CLOCKS_PER_SEC = 1000;
+
+    public static int clockTicks() {
+        return clock();
+    }
+
+    public static double elapsedSeconds(int startTicks) {
+        int current = clock();
+        int diff = current - startTicks;
+        return (double)diff / Time.CLOCKS_PER_SEC;
+    }
+}
+
+public class Timer {
+    private int startTicks;
+    private bool isRunning;
+
+    public Timer() {
+        this.startTicks = 0;
+        this.isRunning = false;
+    }
+
+    public void start() {
+        this.startTicks = clock();
+        this.isRunning = true;
+    }
+
+    public void stop() {
+        this.isRunning = false;
+    }
+
+    public void reset() {
+        this.startTicks = clock();
+    }
+
+    public double elapsedSeconds() {
+        if (!this.isRunning) return 0.0;
+        int current = clock();
+        int diff = current - this.startTicks;
+        return (double)diff / Time.CLOCKS_PER_SEC;
+    }
+
+    public int elapsedMillis() {
+        if (!this.isRunning) return 0;
+        int current = clock();
+        int diff = current - this.startTicks;
+        return diff;
+    }
+
+    public bool isRunning() {
+        return this.isRunning;
+    }
+}

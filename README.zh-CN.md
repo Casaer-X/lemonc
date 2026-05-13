@@ -83,7 +83,7 @@ lemonc --build ./my_project
 
 package main;
 
-public class App {
+public class MyApp { // 主类名可以任意命名
     public static void main(String[] args) {
         printf("Hello, World!\n");
     }

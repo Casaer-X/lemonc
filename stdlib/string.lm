@@ -1,0 +1,59 @@
+// @compile target=library
+// Lemon Standard Library - String Utilities Module
+
+package string;
+
+public class StringUtils {
+    public static bool isEmpty(String s) {
+        return s.length() == 0;
+    }
+
+    public static bool isBlank(String s) {
+        String trimmed = s.trim();
+        return trimmed.length() == 0;
+    }
+
+    public static bool startsWith(String s, String prefix) {
+        int sLen = s.length();
+        int pLen = prefix.length();
+        if (pLen > sLen) return false;
+        return s.indexOf(prefix) == 0;
+    }
+
+    public static bool endsWith(String s, String suffix) {
+        int sLen = s.length();
+        int sufLen = suffix.length();
+        if (sufLen > sLen) return false;
+        int idx = s.indexOf(suffix);
+        return idx == sLen - sufLen;
+    }
+
+    public static bool contains(String s, String substr) {
+        return s.indexOf(substr) >= 0;
+    }
+
+    public static int countOccurrences(String s, String substr) {
+        int count = 0;
+        String temp = s;
+        while (true) {
+            int found = temp.indexOf(substr);
+            if (found < 0) break;
+            count = count + 1;
+            temp = temp.substring(found + substr.length(), temp.length());
+        }
+        return count;
+    }
+
+    public static String intToString(int value) {
+        return String.intToString(value);
+    }
+
+    public static int stringToInt(String s) {
+        return s.toInt();
+    }
+
+    public static String boolToString(bool value) {
+        if (value) return "true";
+        return "false";
+    }
+}

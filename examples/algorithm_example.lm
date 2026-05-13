@@ -1,0 +1,286 @@
+// @compile target=exe
+// Lemon 示例 - 数组与算法
+
+package examples;
+
+public class AlgorithmExample {
+    public static void main(String[] args) {
+        printf("=== 数组与算法示例 ===\n\n");
+
+        Array<int> arr = new Array();
+        arr.add(64);
+        arr.add(34);
+        arr.add(25);
+        arr.add(12);
+        arr.add(22);
+        arr.add(11);
+        arr.add(90);
+
+        printf("原始数组: ");
+        AlgorithmExample.printArray(arr);
+
+        // 1. 冒泡排序
+        printf("\n1. 冒泡排序:\n");
+        Array<int> bubbleArr = AlgorithmExample.copyArray(arr);
+        AlgorithmExample.bubbleSort(bubbleArr);
+        printf("   结果: ");
+        AlgorithmExample.printArray(bubbleArr);
+
+        // 2. 选择排序
+        printf("\n2. 选择排序:\n");
+        Array<int> selectArr = AlgorithmExample.copyArray(arr);
+        AlgorithmExample.selectionSort(selectArr);
+        printf("   结果: ");
+        AlgorithmExample.printArray(selectArr);
+
+        // 3. 插入排序
+        printf("\n3. 插入排序:\n");
+        Array<int> insertArr = AlgorithmExample.copyArray(arr);
+        AlgorithmExample.insertionSort(insertArr);
+        printf("   结果: ");
+        AlgorithmExample.printArray(insertArr);
+
+        // 4. 线性查找
+        printf("\n4. 线性查找:\n");
+        int target = 22;
+        int index = AlgorithmExample.linearSearch(arr, target);
+        printf("   查找 %d: 索引 = %d\n", target, index);
+        int notFound = AlgorithmExample.linearSearch(arr, 999);
+        printf("   查找 999: 索引 = %d (未找到)\n", notFound);
+
+        // 5. 二分查找
+        printf("\n5. 二分查找:\n");
+        Array<int> sortedArr = AlgorithmExample.copyArray(arr);
+        AlgorithmExample.bubbleSort(sortedArr);
+        printf("   排序后数组: ");
+        AlgorithmExample.printArray(sortedArr);
+        int binIndex = AlgorithmExample.binarySearch(sortedArr, 25);
+        printf("   查找 25: 索引 = %d\n", binIndex);
+
+        // 6. 数组统计
+        printf("\n6. 数组统计:\n");
+        printf("   大小 = %d\n", arr.size());
+        printf("   最大值 = %d\n", AlgorithmExample.maxArray(arr));
+        printf("   最小值 = %d\n", AlgorithmExample.minArray(arr));
+        printf("   求和 = %d\n", AlgorithmExample.sumArray(arr));
+        printf("   平均值 = %d\n", AlgorithmExample.avgArray(arr));
+
+        // 7. 数组操作
+        printf("\n7. 数组操作:\n");
+        Array<int> revArr = AlgorithmExample.copyArray(arr);
+        AlgorithmExample.reverseArray(revArr);
+        printf("   反转: ");
+        AlgorithmExample.printArray(revArr);
+
+        Array<int> fillArr = new Array();
+        fillArr.add(0);
+        fillArr.add(0);
+        fillArr.add(0);
+        fillArr.add(0);
+        fillArr.add(0);
+        AlgorithmExample.fillArray(fillArr, 42);
+        printf("   填充 42: ");
+        AlgorithmExample.printArray(fillArr);
+
+        // 8. 查找与计数
+        printf("\n8. 查找与计数:\n");
+        printf("   包含 22: %d\n", AlgorithmExample.contains(arr, 22));
+        printf("   包含 999: %d\n", AlgorithmExample.contains(arr, 999));
+        printf("   22 出现次数: %d\n", AlgorithmExample.count(arr, 22));
+
+        // 9. 去重
+        printf("\n9. 去重:\n");
+        Array<int> dupArr = new Array();
+        dupArr.add(1);
+        dupArr.add(2);
+        dupArr.add(2);
+        dupArr.add(3);
+        dupArr.add(3);
+        dupArr.add(3);
+        printf("   原始: ");
+        AlgorithmExample.printArray(dupArr);
+        Array<int> uniqueArr = AlgorithmExample.unique(dupArr);
+        printf("   去重: ");
+        AlgorithmExample.printArray(uniqueArr);
+
+        printf("\n=== 示例结束 ===\n");
+    }
+
+    public static void printArray(Array<int> arr) {
+        int n = arr.size();
+        printf("[");
+        for (int i = 0; i < n; i++) {
+            printf("%d", arr.get(i));
+            if (i < n - 1) {
+                printf(", ");
+            }
+        }
+        printf("]\n");
+    }
+
+    public static Array<int> copyArray(Array<int> arr) {
+        Array<int> result = new Array();
+        int n = arr.size();
+        for (int i = 0; i < n; i++) {
+            result.add(arr.get(i));
+        }
+        return result;
+    }
+
+    public static void bubbleSort(Array<int> arr) {
+        int n = arr.size();
+        for (int i = 0; i < n - 1; i++) {
+            for (int j = 0; j < n - i - 1; j++) {
+                if (arr.get(j) > arr.get(j + 1)) {
+                    int temp = arr.get(j);
+                    arr.set(j, arr.get(j + 1));
+                    arr.set(j + 1, temp);
+                }
+            }
+        }
+    }
+
+    public static void selectionSort(Array<int> arr) {
+        int n = arr.size();
+        for (int i = 0; i < n - 1; i++) {
+            int minIdx = i;
+            for (int j = i + 1; j < n; j++) {
+                if (arr.get(j) < arr.get(minIdx)) {
+                    minIdx = j;
+                }
+            }
+            int temp = arr.get(i);
+            arr.set(i, arr.get(minIdx));
+            arr.set(minIdx, temp);
+        }
+    }
+
+    public static void insertionSort(Array<int> arr) {
+        int n = arr.size();
+        for (int i = 1; i < n; i++) {
+            int key = arr.get(i);
+            int j = i - 1;
+            while (j >= 0 && arr.get(j) > key) {
+                arr.set(j + 1, arr.get(j));
+                j = j - 1;
+            }
+            arr.set(j + 1, key);
+        }
+    }
+
+    public static int linearSearch(Array<int> arr, int target) {
+        int n = arr.size();
+        for (int i = 0; i < n; i++) {
+            if (arr.get(i) == target) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public static int binarySearch(Array<int> arr, int target) {
+        int left = 0;
+        int right = arr.size() - 1;
+        while (left <= right) {
+            int mid = left + right;
+            mid = mid / 2;
+            int midVal = arr.get(mid);
+            if (midVal == target) {
+                return mid;
+            }
+            if (midVal < target) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+        return -1;
+    }
+
+    public static int maxArray(Array<int> arr) {
+        int n = arr.size();
+        if (n == 0) return 0;
+        int maxVal = arr.get(0);
+        for (int i = 1; i < n; i++) {
+            int val = arr.get(i);
+            if (val > maxVal) {
+                maxVal = val;
+            }
+        }
+        return maxVal;
+    }
+
+    public static int minArray(Array<int> arr) {
+        int n = arr.size();
+        if (n == 0) return 0;
+        int minVal = arr.get(0);
+        for (int i = 1; i < n; i++) {
+            int val = arr.get(i);
+            if (val < minVal) {
+                minVal = val;
+            }
+        }
+        return minVal;
+    }
+
+    public static int sumArray(Array<int> arr) {
+        int total = 0;
+        int n = arr.size();
+        for (int i = 0; i < n; i++) {
+            total = total + arr.get(i);
+        }
+        return total;
+    }
+
+    public static int avgArray(Array<int> arr) {
+        int n = arr.size();
+        if (n == 0) return 0;
+        return AlgorithmExample.sumArray(arr) / n;
+    }
+
+    public static void reverseArray(Array<int> arr) {
+        int left = 0;
+        int right = arr.size() - 1;
+        while (left < right) {
+            int temp = arr.get(left);
+            arr.set(left, arr.get(right));
+            arr.set(right, temp);
+            left = left + 1;
+            right = right - 1;
+        }
+    }
+
+    public static void fillArray(Array<int> arr, int value) {
+        int n = arr.size();
+        for (int i = 0; i < n; i++) {
+            arr.set(i, value);
+        }
+    }
+
+    public static bool contains(Array<int> arr, int value) {
+        return AlgorithmExample.linearSearch(arr, value) >= 0;
+    }
+
+    public static int count(Array<int> arr, int value) {
+        int c = 0;
+        int n = arr.size();
+        for (int i = 0; i < n; i++) {
+            if (arr.get(i) == value) {
+                c = c + 1;
+            }
+        }
+        return c;
+    }
+
+    public static Array<int> unique(Array<int> arr) {
+        Array<int> result = new Array();
+        int n = arr.size();
+        for (int i = 0; i < n; i++) {
+            int val = arr.get(i);
+            if (!AlgorithmExample.contains(result, val)) {
+                result.add(val);
+            }
+        }
+        return result;
+    }
+}

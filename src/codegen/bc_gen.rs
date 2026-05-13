@@ -300,8 +300,8 @@ impl BytecodeGen {
                 self.label_map.insert(end_label.clone(), end_pos);
             }
             Stmt::For(init, cond, update, body) => {
-                if let Some(i) = init {
-                    self.gen_stmt(func, i);
+                if let Some(stmt) = init {
+                    self.gen_stmt(func, stmt.as_ref());
                 }
 
                 let start_label = format!("_L_for_start_{}", self.label_map.len());
@@ -336,7 +336,7 @@ impl BytecodeGen {
 
     fn gen_expr(&mut self, func: &mut BytecodeFunction, expr: &Expr) {
         match expr {
-            Expr::IntLiteral(v) => {
+            Expr::IntegerLiteral(v) => {
                 let idx = self.program.add_constant(Constant::Int(*v));
                 func.code.push(BytecodeOp::PushConst(idx));
             }
@@ -352,7 +352,7 @@ impl BytecodeGen {
                 let idx = self.program.add_constant(Constant::Bool(*v));
                 func.code.push(BytecodeOp::PushConst(idx));
             }
-            Expr::NullLiteral => {
+            Expr::Null => {
                 func.code.push(BytecodeOp::LoadNull);
             }
             Expr::Variable(name) => {
@@ -396,9 +396,10 @@ impl BytecodeGen {
             Expr::UnaryOp(op, operand) => {
                 self.gen_expr(func, operand);
                 let bc_op = match op {
-                    UnaryOp::Neg => BytecodeOp::Neg,
+                    UnaryOp::Minus => BytecodeOp::Neg,
                     UnaryOp::Not => BytecodeOp::LNot,
                     UnaryOp::BitNot => BytecodeOp::BitNot,
+                    _ => BytecodeOp::Nop,
                 };
                 func.code.push(bc_op);
             }
@@ -446,15 +447,41 @@ impl BytecodeGen {
                     }
                 }
             }
-            Expr::FunctionCall(name, args) => {
-                for arg in args {
-                    self.gen_expr(func, arg);
-                }
-                if let Some(idx) = self.program.get_function_idx(name) {
-                    func.code.push(BytecodeOp::Call(idx));
-                } else if name == "printf" || name == "malloc" || name == "free" {
-                    let idx = self.program.add_constant(Constant::String(name.clone()));
-                    func.code.push(BytecodeOp::ExternCall(idx));
+            Expr::Call(callee, args) => {
+                match callee.as_ref() {
+                    Expr::Variable(name) => {
+                        for arg in args {
+                            self.gen_expr(func, arg);
+                        }
+                        if let Some(idx) = self.program.get_function_idx(name) {
+                            func.code.push(BytecodeOp::Call(idx));
+                        } else if name == "printf" || name == "malloc" || name == "free" || name == "exit" || name == "clock" || name == "strlen" || name == "strcmp" || name == "srand" || name == "rand" {
+                            let idx = self.program.add_constant(Constant::String(name.clone()));
+                            func.code.push(BytecodeOp::ExternCall(idx));
+                        }
+                    }
+                    Expr::FieldAccess(obj, method) => {
+                        if let Expr::Variable(class_name) = obj.as_ref() {
+                            let mangled = format!("{}_{}", class_name, method);
+                            for arg in args {
+                                self.gen_expr(func, arg);
+                            }
+                            if let Some(idx) = self.program.get_function_idx(&mangled) {
+                                func.code.push(BytecodeOp::Call(idx));
+                            }
+                        } else {
+                            self.gen_expr(func, obj);
+                            for arg in args {
+                                self.gen_expr(func, arg);
+                            }
+                        }
+                    }
+                    _ => {
+                        self.gen_expr(func, callee);
+                        for arg in args {
+                            self.gen_expr(func, arg);
+                        }
+                    }
                 }
             }
             Expr::New(class_name, _, args) => {
@@ -465,19 +492,13 @@ impl BytecodeGen {
                     func.code.push(BytecodeOp::New(idx));
                 }
             }
-            Expr::Cast(expr, target_type) => {
+            Expr::Cast(target_type, expr) => {
                 self.gen_expr(func, expr);
                 if let TypeRef::Named(name, _) = target_type {
                     if let Some(idx) = self.program.get_class_idx(name) {
                         func.code.push(BytecodeOp::Cast(idx));
                     }
                 }
-            }
-            Expr::ArrayLiteral(elements) => {
-                for elem in elements {
-                    self.gen_expr(func, elem);
-                }
-                func.code.push(BytecodeOp::NewArray);
             }
             Expr::ArrayAccess(arr, idx) => {
                 self.gen_expr(func, arr);

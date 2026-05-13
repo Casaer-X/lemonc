@@ -80,12 +80,13 @@ impl AnnotationParser {
 
         for decl in &program.declarations {
             if let Declaration::Class(class) = decl {
-                // 检查类上的注解（通过注释或特殊标记）
-                // 当前 Lemon 解析器会跳过 @ 注解，我们需要从源代码重新解析
-                // 这里使用约定：类名和特定注释模式
-                
-                if class.name == "App" {
-                    config.is_entry_point = true;
+                for member in &class.members {
+                    if let ClassMember::Method(method) = member {
+                        if method.name == "main" && method.modifiers.iter().any(|m| matches!(m, MethodModifier::Static)) {
+                            config.is_entry_point = true;
+                            return config;
+                        }
+                    }
                 }
             }
         }

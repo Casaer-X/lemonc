@@ -1,0 +1,44 @@
+// @compile target=library
+// Lemon Standard Library - System Module
+
+package system;
+
+public class System {
+    public static final int EXIT_SUCCESS = 0;
+    public static final int EXIT_FAILURE = 1;
+
+    public static void exit(int code) {
+        exit(code);
+    }
+
+    public static void exitSuccess() {
+        exit(0);
+    }
+
+    public static void exitFailure() {
+        exit(1);
+    }
+}
+
+public class Assert {
+    public static void assertTrue(bool condition) {
+        if (!condition) {
+            printf("Assertion failed\n");
+            exit(1);
+        }
+    }
+
+    public static void assertTrue(bool condition, String message) {
+        if (!condition) {
+            printf("Assertion failed: %s\n", message);
+            exit(1);
+        }
+    }
+
+    public static void assertEquals(int expected, int actual) {
+        if (expected != actual) {
+            printf("Assertion failed: expected %d, got %d\n", expected, actual);
+            exit(1);
+        }
+    }
+}

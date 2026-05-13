@@ -134,8 +134,8 @@ impl AstOptimizer {
                 }
             }
             Stmt::For(init, cond, update, body) => {
-                if let Some(e) = init {
-                    self.optimize_expr(e);
+                if let Some(stmt) = init {
+                    self.optimize_stmt(&mut stmt.as_ref().clone());
                 }
                 if let Some(e) = cond {
                     self.optimize_expr(e);

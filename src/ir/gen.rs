@@ -321,8 +321,8 @@ impl IRGenerator {
                 let end_label = format!("for_end_{}", self.value_counter);
                 self.value_counter += 1;
 
-                if let Some(init_expr) = init {
-                    self.generate_expr(func, init_expr);
+                if let Some(stmt) = init {
+                    self.generate_stmt(func, stmt.as_ref());
                 }
 
                 func.new_block(&loop_label);

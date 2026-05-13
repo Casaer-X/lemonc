@@ -89,12 +89,10 @@ impl NativeCodeGen {
 
         for decl in &ast.declarations {
             if let Declaration::Class(c) = decl {
-                if c.name == "App" {
-                    for m in &c.members {
-                        if let ClassMember::Method(method) = m {
-                            if method.name == "main" {
-                                self.gen_main(method);
-                            }
+                for m in &c.members {
+                    if let ClassMember::Method(method) = m {
+                        if method.name == "main" && method.modifiers.iter().any(|m| matches!(m, MethodModifier::Static)) {
+                            self.gen_main(method, &c.name);
                         }
                     }
                 }
@@ -238,7 +236,7 @@ impl NativeCodeGen {
             || matches!(m, ClassMember::Method(method) if method.name == c.name))
     }
 
-    fn gen_main(&mut self, method: &MethodDecl) {
+    fn gen_main(&mut self, method: &MethodDecl, class_name: &str) {
         self.set_sym_offset("main", self.text.len() as u32);
         self.emit(&[0x55]);
         self.emit(&[0x48, 0x89, 0xE5]);
@@ -247,7 +245,7 @@ impl NativeCodeGen {
         let off = self.text.len() as u32;
         self.emit_rel32(0);
         self.relocs.push((off, "__main".to_string()));
-        let mangled = mangle_method_name("App", "main", &method.params);
+        let mangled = mangle_method_name(class_name, "main", &method.params);
         self.emit(&[0x48, 0xC7, 0xC1, 0, 0, 0, 0]);
         self.emit(&[0xE8]);
         let off2 = self.text.len() as u32;
@@ -466,7 +464,7 @@ impl NativeCodeGen {
             Stmt::For(init, cond, update, body) => {
                 let start = self.new_label();
                 let end = self.new_label();
-                if let Some(e) = init { self.expr_rax(e); }
+                if let Some(stmt) = init { self.gen_stmt(stmt.as_ref()); }
                 self.set_label(&start);
                 if let Some(e) = cond {
                     self.expr_rax(e);
@@ -621,27 +619,71 @@ impl NativeCodeGen {
                         self.emit_add_rsp(32);
                     }
                     Expr::FieldAccess(obj, method) => {
-                        let cn = self.infer_class(obj);
-                        let aregs = [Reg::Rdx, Reg::R8, Reg::R9];
-                        self.expr_rax(obj);
-                        self.emit(&[0x50]);
-                        for (i, arg) in args.iter().enumerate() {
-                            self.expr_rax(arg);
-                            self.emit(&[0x50]); // push rax
+                        if let Expr::Variable(class_name) = obj.as_ref() {
+                            if !self.var_stack.contains_key(class_name) {
+                                let aregs = [Reg::Rcx, Reg::Rdx, Reg::R8, Reg::R9];
+                                self.emit_mov_rax_imm(0);
+                                self.emit(&[0x50]);
+                                for (i, arg) in args.iter().enumerate() {
+                                    self.expr_rax(arg);
+                                    self.emit(&[0x50]);
+                                }
+                                for i in (0..args.len().min(aregs.len())).rev() {
+                                    self.emit_pop_reg(aregs[i]);
+                                }
+                                self.emit(&[0x59]);
+                                self.emit_sub_rsp(32);
+                                let mangled = self.resolve_overload(class_name, method, args.len());
+                                self.emit(&[0xE8]);
+                                let off = self.text.len() as u32;
+                                self.emit_rel32(0);
+                                self.relocs.push((off, mangled));
+                                self.emit_add_rsp(32);
+                            } else {
+                                let aregs = [Reg::Rdx, Reg::R8, Reg::R9];
+                                self.expr_rax(obj);
+                                self.emit(&[0x50]);
+                                for (i, arg) in args.iter().enumerate() {
+                                    self.expr_rax(arg);
+                                    self.emit(&[0x50]);
+                                }
+                                for i in (0..args.len().min(aregs.len())).rev() {
+                                    self.emit_pop_reg(aregs[i]);
+                                }
+                                self.emit(&[0x59]);
+                                self.emit_sub_rsp(32);
+                                if let Some(cn) = self.infer_class(obj) {
+                                    let mangled = self.resolve_overload(&cn, method, args.len());
+                                    self.emit(&[0xE8]);
+                                    let off = self.text.len() as u32;
+                                    self.emit_rel32(0);
+                                    self.relocs.push((off, mangled));
+                                }
+                                self.emit_add_rsp(32);
+                            }
+                        } else {
+                            let cn = self.infer_class(obj);
+                            let aregs = [Reg::Rdx, Reg::R8, Reg::R9];
+                            self.expr_rax(obj);
+                            self.emit(&[0x50]);
+                            for (i, arg) in args.iter().enumerate() {
+                                self.expr_rax(arg);
+                                self.emit(&[0x50]);
+                            }
+                            for i in (0..args.len().min(aregs.len())).rev() {
+                                self.emit_pop_reg(aregs[i]);
+                            }
+                            self.emit(&[0x59]);
+                            self.emit_sub_rsp(32);
+                            if let Some(cn) = &cn {
+                                let mangled = self.resolve_overload(cn, method, args.len());
+                                self.emit(&[0xE8]);
+                                let off = self.text.len() as u32;
+                                self.emit_rel32(0);
+                                self.relocs.push((off, mangled));
+                            }
+                            self.emit_add_rsp(32);
                         }
-                        for i in (0..args.len().min(aregs.len())).rev() {
-                            self.emit_pop_reg(aregs[i]);
-                        }
-                        self.emit(&[0x59]); // pop rcx
-                        self.emit_sub_rsp(32);
-                        if let Some(cn) = &cn {
-                            let mangled = self.resolve_overload(cn, method, args.len());
-                            self.emit(&[0xE8]);
-                            let off = self.text.len() as u32;
-                            self.emit_rel32(0);
-                            self.relocs.push((off, mangled));
-                        }
-                        self.emit_add_rsp(32);
                     }
                     Expr::Super => {
                         if let Some((off, _)) = self.var_stack.get("self") {

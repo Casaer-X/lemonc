@@ -1,0 +1,131 @@
+// @compile target=library
+// Lemon Standard Library - Math Module
+
+package math;
+
+public class Math {
+    public static final double PI = 3.141592653589793;
+    public static final double E = 2.718281828459045;
+    public static final double EPSILON = 0.000001;
+
+    public static double abs(double x) {
+        if (x < 0.0) return -x;
+        return x;
+    }
+
+    public static int absInt(int x) {
+        if (x < 0) return -x;
+        return x;
+    }
+
+    public static double max(double a, double b) {
+        if (a > b) return a;
+        return b;
+    }
+
+    public static int maxInt(int a, int b) {
+        if (a > b) return a;
+        return b;
+    }
+
+    public static double min(double a, double b) {
+        if (a < b) return a;
+        return b;
+    }
+
+    public static int minInt(int a, int b) {
+        if (a < b) return a;
+        return b;
+    }
+
+    public static double clamp(double value, double minVal, double maxVal) {
+        if (value < minVal) return minVal;
+        if (value > maxVal) return maxVal;
+        return value;
+    }
+
+    public static int clampInt(int value, int minVal, int maxVal) {
+        if (value < minVal) return minVal;
+        if (value > maxVal) return maxVal;
+        return value;
+    }
+
+    public static double toRadians(double degrees) {
+        return degrees * PI / 180.0;
+    }
+
+    public static double toDegrees(double radians) {
+        return radians * 180.0 / PI;
+    }
+
+    public static bool isClose(double a, double b) {
+        double diff = a - b;
+        if (diff < 0.0) diff = -diff;
+        return diff < EPSILON;
+    }
+
+    public static int factorial(int n) {
+        if (n <= 1) return 1;
+        return n * Math.factorial(n - 1);
+    }
+
+    public static int powInt(int base, int exp) {
+        if (exp < 0) return 0;
+        if (exp == 0) return 1;
+        int result = 1;
+        for (int i = 0; i < exp; i = i + 1) {
+            result = result * base;
+        }
+        return result;
+    }
+
+    public static double sqrtApprox(double x) {
+        if (x < 0.0) return 0.0;
+        if (x == 0.0) return 0.0;
+        double guess = x;
+        for (int i = 0; i < 20; i = i + 1) {
+            double temp = guess + x / guess;
+            guess = temp / 2.0;
+        }
+        return guess;
+    }
+
+    public static int gcd(int a, int b) {
+        a = Math.absInt(a);
+        b = Math.absInt(b);
+        while (b != 0) {
+            int temp = b;
+            b = a % b;
+            a = temp;
+        }
+        return a;
+    }
+
+    public static int lcm(int a, int b) {
+        if (a == 0 || b == 0) return 0;
+        return Math.absInt(a * b) / Math.gcd(a, b);
+    }
+
+    public static bool isPrime(int n) {
+        if (n <= 1) return false;
+        if (n <= 3) return true;
+        if (n % 2 == 0) return false;
+        for (int i = 3; i * i <= n; i = i + 2) {
+            if (n % i == 0) return false;
+        }
+        return true;
+    }
+
+    public static int fibonacci(int n) {
+        if (n <= 0) return 0;
+        if (n == 1) return 1;
+        int a = 0;
+        int b = 1;
+        for (int i = 2; i <= n; i = i + 1) {
+            int temp = a + b;
+            a = b;
+            b = temp;
+        }
+        return b;
+    }
+}

@@ -636,22 +636,21 @@ impl CCodeGen {
 
         for decl in &ast.declarations {
             if let Declaration::Class(class) = decl {
-                if class.name == "App" {
-                    for member in &class.members {
-                        if let ClassMember::Method(method) = member {
-                            if method.name == "main" {
-                                let mangled = mangle_method_name(&class.name, &method.name, &method.params);
-                                self.emit_line("int main(int argc, char** argv) {");
-                                self.indent += 1;
-                                self.emit_line(&format!(
-                                    "{}(NULL, argv);",
-                                    mangled
-                                ));
-                                self.emit_line("return 0;");
-                                self.indent -= 1;
-                                self.emit_line("}");
-                                self.emit_line("");
-                            }
+                for member in &class.members {
+                    if let ClassMember::Method(method) = member {
+                        if method.name == "main" && method.modifiers.iter().any(|m| matches!(m, MethodModifier::Static)) {
+                            let mangled = mangle_method_name(&class.name, &method.name, &method.params);
+                            self.emit_line("int main(int argc, char** argv) {");
+                            self.indent += 1;
+                            self.emit_line(&format!(
+                                "{}(NULL, argv);",
+                                mangled
+                            ));
+                            self.emit_line("return 0;");
+                            self.indent -= 1;
+                            self.emit_line("}");
+                            self.emit_line("");
+                            return String::from_utf8_lossy(&self.output).to_string();
                         }
                     }
                 }
@@ -1087,7 +1086,21 @@ impl CCodeGen {
             }
             Stmt::For(init, cond, update, body) => {
                 let init_str = match init {
-                    Some(e) => self.gen_expr(e),
+                    Some(stmt) => {
+                        match stmt.as_ref() {
+                            Stmt::VarDecl(vd) => {
+                                let type_str = self.c_type(&vd.var_type);
+                                let name = &vd.name;
+                                let init_expr = match &vd.initializer {
+                                    Some(e) => format!(" = {}", self.gen_expr(e)),
+                                    None => String::new(),
+                                };
+                                format!("{} {}{}", type_str, name, init_expr)
+                            }
+                            Stmt::Expr(e) => self.gen_expr(e),
+                            _ => String::new(),
+                        }
+                    }
                     None => String::new(),
                 };
                 let cond_str = match cond {
@@ -1225,6 +1238,9 @@ impl CCodeGen {
                 }
             }
         }
+        if self.method_signatures.contains_key(var_name) {
+            return Some(var_name.to_string());
+        }
         None
     }
 
@@ -1291,7 +1307,10 @@ impl CCodeGen {
                             format!("{}->itable_{}->{}({}{})", obj_str, iface_name, method, obj_str, args_part)
                         } else if let Some(cn) = &class_name {
                             let mangled = self.resolve_method_overload(cn, method, &arg_strs);
-                            if self.is_virtual_method(cn, method, arg_strs.len()) && !matches!(obj.as_ref(), Expr::This | Expr::Super) {
+                            let is_static = matches!(obj.as_ref(), Expr::Variable(name) if self.method_signatures.contains_key(name.as_str()) && !self.var_types.contains_key(name.as_str()));
+                            if is_static {
+                                format!("{}(NULL{})", mangled, args_part)
+                            } else if self.is_virtual_method(cn, method, arg_strs.len()) && !matches!(obj.as_ref(), Expr::This | Expr::Super) {
                                 format!("(({}_vtable*){}->vtable)->{}({}{})", cn, obj_str, mangled, obj_str, args_part)
                             } else {
                                 let cast_obj = if cn != self.current_class.as_deref().unwrap_or("") {
@@ -1321,18 +1340,22 @@ impl CCodeGen {
                 }
             }
             Expr::MethodCall(obj, method, args) => {
-                let obj_str = self.gen_expr(obj);
                 let arg_strs: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
                 let args_str = if arg_strs.is_empty() { String::new() } else { format!(", {}", arg_strs.join(", ")) };
                 let class_name = self.infer_class_from_expr(obj);
 
                 if let Some(iface_name) = self.infer_interface_from_expr(obj) {
+                    let obj_str = self.gen_expr(obj);
                     format!("{}->itable_{}->{}({}{})", obj_str, iface_name, method, obj_str, args_str)
                 } else if let Some(cn) = &class_name {
                     let mangled = self.resolve_method_overload(cn, method, &arg_strs);
-                    if self.is_virtual_method(cn, method, arg_strs.len()) && !matches!(obj.as_ref(), Expr::This | Expr::Super) {
+                    if matches!(obj.as_ref(), Expr::Variable(name) if self.method_signatures.contains_key(name)) {
+                        format!("{}(NULL{})", mangled, args_str)
+                    } else if self.is_virtual_method(cn, method, arg_strs.len()) && !matches!(obj.as_ref(), Expr::This | Expr::Super) {
+                        let obj_str = self.gen_expr(obj);
                         format!("(({}_vtable*){}->vtable)->{}({}{})", cn, obj_str, mangled, obj_str, args_str)
                     } else {
+                        let obj_str = self.gen_expr(obj);
                         let cast_obj = if cn != self.current_class.as_deref().unwrap_or("") {
                             format!("({}*){}", cn, obj_str)
                         } else {
@@ -1341,6 +1364,7 @@ impl CCodeGen {
                         format!("{}({}{})", mangled, cast_obj, args_str)
                     }
                 } else {
+                    let obj_str = self.gen_expr(obj);
                     let inferred_type = self.infer_string_method(obj, method);
                     format!("{}_{}({}{})", inferred_type, method, obj_str, args_str)
                 }
@@ -1785,8 +1809,18 @@ impl CCodeGen {
                 self.collect_generic_instances_from_stmt(body);
             }
             Stmt::For(init, cond, update, body) => {
-                if let Some(e) = init {
-                    self.collect_generic_instances_from_expr(e);
+                if let Some(stmt) = init {
+                    match stmt.as_ref() {
+                        Stmt::VarDecl(vd) => {
+                            if let Some(e) = &vd.initializer {
+                                self.collect_generic_instances_from_expr(e);
+                            }
+                        }
+                        Stmt::Expr(e) => {
+                            self.collect_generic_instances_from_expr(e);
+                        }
+                        _ => {}
+                    }
                 }
                 if let Some(e) = cond {
                     self.collect_generic_instances_from_expr(e);

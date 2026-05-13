@@ -134,13 +134,30 @@ impl Parser {
 
     fn parse_package_decl(&mut self) -> PackageDecl {
         self.expect(TokenKind::Package).unwrap();
-        let name = self.expect_identifier().unwrap();
+        let name = self.parse_package_name();
         self.expect(TokenKind::Semicolon).ok();
-        let lexeme = match name.kind {
-            TokenKind::Identifier(s) => s,
-            _ => String::new(),
-        };
-        PackageDecl { name: lexeme }
+        PackageDecl { name }
+    }
+
+    fn parse_package_name(&mut self) -> String {
+        let mut parts = Vec::new();
+
+        while !self.is_at_end() {
+            match self.peek_kind() {
+                Some(TokenKind::Identifier(_)) => {
+                    let token = self.advance().unwrap();
+                    if let TokenKind::Identifier(s) = token.kind {
+                        parts.push(s);
+                    }
+                }
+                Some(TokenKind::Dot) => {
+                    self.advance();
+                }
+                _ => break,
+            }
+        }
+
+        parts.join(".")
     }
 
     fn parse_import_decl(&mut self) -> ImportDecl {
@@ -879,7 +896,18 @@ impl Parser {
         self.expect(TokenKind::LeftParen).ok();
 
         let init = if self.peek_kind() != Some(TokenKind::Semicolon) {
-            Some(self.parse_expression())
+            let is_decl = matches!(
+                self.peek_kind(),
+                Some(TokenKind::Int | TokenKind::Long | TokenKind::Float | 
+                     TokenKind::Double | TokenKind::Bool | 
+                     TokenKind::Byte | TokenKind::Char | TokenKind::Short | 
+                     TokenKind::Void)
+            );
+            if is_decl {
+                Some(self.parse_var_decl_for_init())
+            } else {
+                Some(Stmt::Expr(self.parse_expression()))
+            }
         } else {
             None
         };
@@ -901,7 +929,7 @@ impl Parser {
 
         let body = Box::new(self.parse_statement().unwrap());
 
-        Stmt::For(init, condition, update, body)
+        Stmt::For(init.map(Box::new), condition, update, body)
     }
 
     fn parse_while_stmt(&mut self) -> Stmt {
@@ -996,6 +1024,31 @@ impl Parser {
             name,
             initializer,
             modifiers,
+        })
+    }
+
+    fn parse_var_decl_for_init(&mut self) -> Stmt {
+        let var_type = self.parse_type_ref();
+        let name_token = match self.expect_identifier().ok() {
+            Some(t) => t,
+            None => return Stmt::Expr(Expr::Variable(String::new())),
+        };
+        let name = match name_token.kind {
+            TokenKind::Identifier(s) => s,
+            _ => String::new(),
+        };
+
+        let initializer = if self.match_token(TokenKind::Assign) {
+            Some(self.parse_expression())
+        } else {
+            None
+        };
+
+        Stmt::VarDecl(VarDecl {
+            var_type,
+            name,
+            initializer,
+            modifiers: Vec::new(),
         })
     }
 

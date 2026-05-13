@@ -2,6 +2,7 @@ use super::annotation::*;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// 项目结构扫描器
 pub struct ProjectScanner;
@@ -277,11 +278,25 @@ impl ProjectBuilder {
         let output_name = file.config.output_name.clone()
             .unwrap_or_else(|| file.config.target.default_output_name(&file.module_name));
 
-        // 这里调用 lemonc 编译器
         let args = self.build_compiler_args(file, &output_name);
         
-        // 实际编译逻辑在 main.rs 中，这里返回配置信息
-        // 实际使用时通过 Command 调用 lemonc
+        // 获取 lemonc 可执行文件路径
+        let lemonc_path = std::env::current_exe()
+            .map_err(|e| format!("Failed to get current executable path: {}", e))?;
+        
+        let mut cmd = Command::new(&lemonc_path);
+        for arg in &args {
+            cmd.arg(arg);
+        }
+        
+        let output = cmd.output()
+            .map_err(|e| format!("Failed to execute lemonc: {}", e))?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Compilation failed: {}", stderr));
+        }
+        
         Ok(output_name)
     }
 

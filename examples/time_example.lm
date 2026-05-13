@@ -1,0 +1,111 @@
+// @compile target=exe
+// Lemon 示例 - 时间测量
+
+package examples;
+
+public class TimeExample {
+    public static void main(String[] args) {
+        printf("=== 时间测量示例 ===\n\n");
+
+        // 1. 获取时钟滴答数
+        printf("1. 时钟滴答数:\n");
+        int ticks1 = clock();
+        printf("   当前滴答数: %d\n\n", ticks1);
+
+        // 2. 测量代码执行时间
+        printf("2. 测量代码执行时间:\n");
+        int start = clock();
+
+        int sum = 0;
+        for (int i = 0; i < 1000000; i++) {
+            sum = sum + i;
+        }
+
+        int end = clock();
+        int diff = end - start;
+        printf("   计算 0 到 999999 的和: %d\n", sum);
+        printf("   耗时: %d 滴答\n\n", diff);
+
+        // 3. 使用 Timer 类
+        printf("3. 使用 Timer 类:\n");
+        Timer timer = new Timer();
+
+        printf("   启动计时器...\n");
+        timer.start();
+
+        for (int i = 0; i < 500000; i++) {
+            int x = i * i;
+        }
+
+        printf("   经过毫秒数: %d\n", timer.elapsedMillis());
+        printf("   是否运行中: %d\n", timer.isRunning());
+
+        timer.stop();
+        printf("   停止后是否运行中: %d\n\n", timer.isRunning());
+
+        // 4. 重置计时器
+        printf("4. 重置计时器:\n");
+        timer.reset();
+        printf("   重置后经过毫秒数: %d\n", timer.elapsedMillis());
+        printf("   重置后是否运行中: %d\n\n", timer.isRunning());
+
+        // 5. 多次测量
+        printf("5. 多次测量:\n");
+        Timer t = new Timer();
+        t.start();
+
+        for (int round = 0; round < 3; round++) {
+            int roundStart = clock();
+
+            int work = 0;
+            int limit = (round + 1) * 200000;
+            for (int i = 0; i < limit; i++) {
+                work = work + 1;
+            }
+
+            int roundEnd = clock();
+            int roundDiff = roundEnd - roundStart;
+            printf("   轮次 %d: 工作量=%d, 耗时=%d 滴答\n", round, work, roundDiff);
+        }
+
+        t.stop();
+        printf("   总耗时: %d 毫秒\n\n", t.elapsedMillis());
+
+        printf("=== 示例结束 ===\n");
+    }
+}
+
+public class Timer {
+    private int startTicks;
+    private bool isRunning;
+
+    public Timer() {
+        this.startTicks = 0;
+        this.isRunning = false;
+    }
+
+    public void start() {
+        this.startTicks = clock();
+        this.isRunning = true;
+    }
+
+    public void stop() {
+        this.isRunning = false;
+    }
+
+    public void reset() {
+        this.startTicks = clock();
+        this.isRunning = true;
+    }
+
+    public int elapsedMillis() {
+        if (!this.isRunning) return 0;
+        int current = clock();
+        int diff = current - this.startTicks;
+        return diff;
+    }
+
+    public bool isRunning() {
+        return this.isRunning;
+    }
+}

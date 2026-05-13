@@ -67,9 +67,9 @@ impl BytecodeCompiler {
             }
         }
 
-        // Find entry point (App.main)
+        // Find entry point (any class with static main)
         for (i, func) in self.module.functions.iter().enumerate() {
-            if func.name == "App_main" || func.name == "main" {
+            if func.name.ends_with("_main") || func.name == "main" {
                 self.module.entry_point = i as u32;
                 break;
             }
@@ -136,7 +136,7 @@ impl BytecodeCompiler {
 
     fn compile_method(&mut self, method: &MethodDecl, class_name: &str) -> u32 {
         let is_static = method.modifiers.iter().any(|m| matches!(m, MethodModifier::Static));
-        let mangled = if is_static && method.name == "main" && class_name == "App" {
+        let mangled = if is_static && method.name == "main" {
             "main".to_string()
         } else {
             mangle_method_name(class_name, &method.name, &method.params)
@@ -320,9 +320,8 @@ impl BytecodeCompiler {
                 self.break_labels.push(end_label);
                 self.continue_labels.push(start_label);
 
-                if let Some(e) = init {
-                    self.compile_expr(func, e);
-                    func.code.push(Bytecode::Pop);
+                if let Some(stmt) = init {
+                    self.compile_stmt(func, stmt.as_ref());
                 }
                 self.emit_label(func, start_label);
                 if let Some(e) = cond {

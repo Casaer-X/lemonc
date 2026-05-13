@@ -492,6 +492,37 @@ class MyClass implements Comparable {
 
 ---
 
+### S016: 裸方法调用
+
+**错误信息**：`Method 'method_name' must be called as 'this.method_name()' or 'ClassName.method_name()'`
+
+**原因**：在类内部调用方法时，省略了 `this.` 或 `类名.` 前缀。
+
+**示例**：
+```lemon
+public class Calculator {
+    public static int add(int a, int b) { return a + b; }
+    
+    public static void test() {
+        int result = add(1, 2);  // 错误：裸方法调用
+    }
+}
+```
+
+**修复**：使用 `this.方法名()` 或 `类名.方法名()` 格式：
+
+```lemon
+public class Calculator {
+    public static int add(int a, int b) { return a + b; }
+    
+    public static void test() {
+        int result = Calculator.add(1, 2);  // 正确
+    }
+}
+```
+
+---
+
 ## 第四阶段：代码生成与链接错误
 
 ### G001: 文件读取错误
@@ -722,24 +753,20 @@ class Child extends Parent {
 
 ---
 
-### W004: 字段或方法可能不存在
+### W004: 无法解析的变量类型
 
-**警告信息**：`Class 'class_name' may not have field or method 'member_name'`
+**警告信息**：`Cannot resolve type of variable 'var_name', field or method access 'member_name' may be invalid`
 
-**原因**：通过变量访问字段或方法时，编译器无法确定该类是否包含该成员。
+**原因**：通过变量访问字段或方法时，编译器无法确定该变量的类型，因此无法验证该成员是否存在。注意：如果变量的类型已知但该类不包含所访问的方法，则会触发 S016 错误而非此警告。
 
 **示例**：
 ```lemon
-class Foo {
-    public int value;
-}
-
-void test(Foo obj) {
-    int x = obj.unknown;  // 警告：Foo 可能没有 unknown 字段
+void test(var obj) {
+    int x = obj.unknown;  // 警告：无法确定 obj 的类型
 }
 ```
 
-**建议**：检查字段/方法名拼写，或确保类定义包含该成员。
+**建议**：为变量指定明确的类型声明，以便编译器能够进行完整的类型检查。
 
 ---
 
@@ -860,7 +887,7 @@ Semantic errors:
 |------|---------|---------|
 | 词法 | L001-L005 | 字符、字符串、数字相关错误 |
 | 语法 | P001-P004 | Token、标识符、输入结束相关错误 |
-| 语义 | S001-S015 | 类型、作用域、继承相关错误 |
+| 语义 | S001-S016 | 类型、作用域、继承相关错误 |
 | 生成 | G001-G005 | 文件 I/O、目标类型错误 |
 | 编译 | C001-C003 | C 编译器相关错误 |
 | 汇编 | N001-N003 | NASM 相关错误 |

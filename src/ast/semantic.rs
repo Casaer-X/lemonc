@@ -61,6 +61,10 @@ pub enum SemanticError {
         method_name: String,
         reason: String,
     },
+    BareMethodCall {
+        method_name: String,
+        class_name: String,
+    },
 }
 
 impl std::fmt::Display for SemanticError {
@@ -100,6 +104,9 @@ impl std::fmt::Display for SemanticError {
             }
             SemanticError::InterfaceMethodSignatureMismatch { class_name, interface_name, method_name, reason } => {
                 write!(f, "Method '{}' in class '{}' does not match interface '{}' signature: {}", method_name, class_name, interface_name, reason)
+            }
+            SemanticError::BareMethodCall { method_name, class_name } => {
+                write!(f, "Method '{}' must be called as 'this.{}()' or '{}.{}()'", method_name, method_name, class_name, method_name)
             }
         }
     }
@@ -593,8 +600,8 @@ impl SemanticAnalyzer {
                 self.check_stmt(body);
             }
             Stmt::For(init, cond, update, body) => {
-                if let Some(e) = init {
-                    self.check_expr(e);
+                if let Some(stmt) = init {
+                    self.check_stmt(stmt.as_ref());
                 }
                 if let Some(e) = cond {
                     self.check_expr(e);
@@ -625,6 +632,20 @@ impl SemanticAnalyzer {
         match expr {
             Expr::Variable(name) => {
                 if !self.lookup_var(name) && !self.is_builtin_func(name) {
+                    // 如果是当前类名（用于静态方法/字段访问），不报错
+                    if let Some(ref current_class) = self.current_class {
+                        if current_class == name {
+                            return;
+                        }
+                        // 如果是当前类的字段（包括静态字段），不报错
+                        if self.class_has_field(current_class, name) {
+                            return;
+                        }
+                    }
+                    // 如果是其他已定义的类名（用于跨类静态访问），不报错
+                    if self.classes.contains_key(name) || self.is_builtin_type(name) {
+                        return;
+                    }
                     self.errors.push(SemanticError::UndefinedVariable {
                         name: name.clone(),
                     });
@@ -642,6 +663,44 @@ impl SemanticAnalyzer {
                 self.check_expr(value);
             }
             Expr::Call(callee, args) => {
+                if let Expr::Variable(name) = callee.as_ref() {
+                    if self.is_builtin_func(name) {
+                        for arg in args {
+                            self.check_expr(arg);
+                        }
+                        return;
+                    }
+                    if let Some(ref current_class) = self.current_class {
+                        if self.class_has_method(current_class, name) {
+                            self.errors.push(SemanticError::BareMethodCall {
+                                method_name: name.clone(),
+                                class_name: current_class.clone(),
+                            });
+                            return;
+                        }
+                    }
+                }
+                if let Expr::FieldAccess(obj, method_name) = callee.as_ref() {
+                    if let Expr::Variable(var_name) = obj.as_ref() {
+                        if self.classes.contains_key(var_name) || self.is_builtin_type(var_name) {
+                            if !self.class_has_method(var_name, method_name) && !self.is_builtin_type_method(var_name, method_name) {
+                                self.errors.push(SemanticError::UndefinedMethod {
+                                    class_name: var_name.clone(),
+                                    method_name: method_name.clone(),
+                                });
+                            }
+                        }
+                    } else if let Expr::This = obj.as_ref() {
+                        if let Some(ref current_class) = self.current_class {
+                            if !self.class_has_method(current_class, method_name) {
+                                self.errors.push(SemanticError::UndefinedMethod {
+                                    class_name: current_class.clone(),
+                                    method_name: method_name.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
                 self.check_expr(callee);
                 for arg in args {
                     self.check_expr(arg);
@@ -660,6 +719,23 @@ impl SemanticAnalyzer {
                                 method_name: method_name.clone(),
                             });
                         }
+                    } else if var_name == "this" || var_name == "super" {
+                        if let Some(ref current_class) = self.current_class {
+                            if !self.class_has_method(current_class, method_name) {
+                                self.errors.push(SemanticError::UndefinedMethod {
+                                    class_name: current_class.clone(),
+                                    method_name: method_name.clone(),
+                                });
+                            }
+                        }
+                    } else if self.classes.contains_key(var_name) || self.is_builtin_type(var_name) {
+                        // Static method call: ClassName.methodName() or built-in type method
+                        if !self.class_has_method(var_name, method_name) && !self.is_builtin_type_method(var_name, method_name) {
+                            self.errors.push(SemanticError::UndefinedMethod {
+                                class_name: var_name.clone(),
+                                method_name: method_name.clone(),
+                            });
+                        }
                     }
                 }
             }
@@ -669,10 +745,19 @@ impl SemanticAnalyzer {
                     if let Some(class_name) = self.resolve_var_class(var_name) {
                         if !self.class_has_field(&class_name, field_name) &&
                            !self.class_has_method(&class_name, field_name) {
-                            self.warnings.push(format!(
-                                "Class '{}' may not have field or method '{}'",
-                                class_name, field_name
-                            ));
+                            self.errors.push(SemanticError::UndefinedMethod {
+                                class_name,
+                                method_name: field_name.clone(),
+                            });
+                        }
+                    } else if self.classes.contains_key(var_name) || self.is_builtin_type(var_name) {
+                        if !self.class_has_field(var_name, field_name) &&
+                           !self.class_has_method(var_name, field_name) &&
+                           !self.is_builtin_type_method(var_name, field_name) {
+                            self.errors.push(SemanticError::UndefinedMethod {
+                                class_name: var_name.clone(),
+                                method_name: field_name.clone(),
+                            });
                         }
                     }
                 }
@@ -825,8 +910,42 @@ impl SemanticAnalyzer {
         matches!(
             name,
             "printf" | "malloc" | "free" | "sizeof" | "exit" | "abort" | "memcpy" | "memset" | "strlen" | "strcmp" | "strdup" | "type_of" | "gc_init" | "gc_mark" | "gc_sweep" | "gc_alloc"
+            | "scanf" | "sprintf" | "sscanf" | "getchar" | "putchar"
+            | "fopen" | "fclose" | "fprintf" | "fscanf" | "fgets" | "fputs" | "feof" | "ferror" | "fflush"
+            | "stdin" | "stdout" | "stderr"
+            | "rand" | "srand" | "time" | "clock"
+            | "sin" | "cos" | "tan" | "sqrt" | "pow" | "log" | "log10" | "exp" | "fabs" | "ceil" | "floor" | "round" | "fmod"
+            | "system" | "getenv" | "getpid" | "getppid"
             | "LemonArray_new" | "LemonArray_add" | "LemonArray_get" | "LemonArray_set" | "LemonArray_size" | "LemonArray_removeAt" | "LemonArray_ensureCapacity"
             | "LemonMap_new" | "LemonMap_put" | "LemonMap_get" | "LemonMap_size" | "LemonMap_containsKey" | "LemonMap_remove"
         )
+    }
+
+    fn is_builtin_type_method(&self, type_name: &str, method_name: &str) -> bool {
+        match type_name {
+            "String" => matches!(
+                method_name,
+                "length" | "charAt" | "substring" | "indexOf" | "lastIndexOf" | "contains" | "startsWith" | "endsWith"
+                | "trim" | "toLowerCase" | "toUpperCase" | "replace" | "split" | "toInt" | "toDouble" | "equals" | "compareTo"
+                | "concat" | "isEmpty" | "intToString"
+            ),
+            "Array" => matches!(
+                method_name,
+                "size" | "length" | "add" | "get" | "set" | "removeAt" | "clear" | "contains" | "indexOf" | "isEmpty"
+            ),
+            "Map" | "HashMap" => matches!(
+                method_name,
+                "size" | "put" | "get" | "containsKey" | "remove" | "clear" | "isEmpty" | "keys" | "values"
+            ),
+            "List" | "LinkedList" => matches!(
+                method_name,
+                "size" | "add" | "get" | "set" | "remove" | "clear" | "contains" | "indexOf" | "isEmpty"
+            ),
+            "Set" | "HashSet" => matches!(
+                method_name,
+                "size" | "add" | "remove" | "contains" | "clear" | "isEmpty"
+            ),
+            _ => false,
+        }
     }
 }
