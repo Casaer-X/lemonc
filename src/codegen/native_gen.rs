@@ -83,6 +83,7 @@ impl NativeCodeGen {
             match decl {
                 Declaration::Class(c) => self.gen_class(c),
                 Declaration::Function(f) => self.gen_func(f),
+                Declaration::Enum(_) => {}
                 _ => {}
             }
         }
@@ -480,6 +481,24 @@ impl NativeCodeGen {
                 for s in &block.statements { self.gen_stmt(s); }
             }
             Stmt::Break | Stmt::Continue => {}
+            Stmt::Switch(_subject, _cases, _default_body) => {
+                self.emit(&[0x48, 0x31, 0xC0]);
+            }
+            Stmt::ForEach(_elem_type, _name, iterable, body) => {
+                let start = self.new_label();
+                let end = self.new_label();
+                self.expr_rax(iterable);
+                self.emit(&[0x50]);
+                self.set_label(&start);
+                self.emit(&[0x58]);
+                self.emit_test_rax();
+                self.emit_jz(&end);
+                self.emit(&[0x50]);
+                self.gen_stmt(body);
+                self.emit(&[0x58]);
+                self.emit_jmp(&start);
+                self.set_label(&end);
+            }
             Stmt::Try(_, _, _) => {}
         }
     }
@@ -776,7 +795,7 @@ impl NativeCodeGen {
             Expr::Cast(_, inner) => self.expr_rax(inner),
             Expr::InstanceOf(_, _) => self.emit_mov_rax_imm(1),
             Expr::Sizeof(_) => self.emit_mov_rax_imm(8),
-            Expr::TypeId(_) | Expr::ArrayAccess(_, _) | Expr::Lambda(_, _) | Expr::Throw(_) => {
+            Expr::TypeId(_) | Expr::ArrayAccess(_, _) | Expr::Lambda(_, _) | Expr::Throw(_) | Expr::Match(_, _) => {
                 self.emit(&[0x48, 0x31, 0xC0]);
             }
         }

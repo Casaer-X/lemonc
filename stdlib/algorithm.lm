@@ -4,70 +4,79 @@
 package algorithm;
 
 public class Sort {
-    public static void bubbleSortInt(Array<int> arr) {
-        int n = arr.size();
+    public static void swapInt(Array<int> values, int left, int right) {
+        if (left == right) return;
+        int temp = values.get(left);
+        values.set(left, values.get(right));
+        values.set(right, temp);
+    }
+
+    public static void bubbleSortInt(Array<int> values) {
+        int n = values.size();
         for (int i = 0; i < n - 1; i = i + 1) {
+            bool swapped = false;
             for (int j = 0; j < n - i - 1; j = j + 1) {
-                if (arr.get(j) > arr.get(j + 1)) {
-                    int temp = arr.get(j);
-                    arr.set(j, arr.get(j + 1));
-                    arr.set(j + 1, temp);
+                if (values.get(j) > values.get(j + 1)) {
+                    Sort.swapInt(values, j, j + 1);
+                    swapped = true;
                 }
             }
+            if (!swapped) return;
         }
     }
 
-    public static void selectionSortInt(Array<int> arr) {
-        int n = arr.size();
+    public static void selectionSortInt(Array<int> values) {
+        int n = values.size();
         for (int i = 0; i < n - 1; i = i + 1) {
-            int minIdx = i;
+            int minIndex = i;
             for (int j = i + 1; j < n; j = j + 1) {
-                if (arr.get(j) < arr.get(minIdx)) {
-                    minIdx = j;
+                if (values.get(j) < values.get(minIndex)) {
+                    minIndex = j;
                 }
             }
-            int temp = arr.get(i);
-            arr.set(i, arr.get(minIdx));
-            arr.set(minIdx, temp);
+            Sort.swapInt(values, i, minIndex);
         }
     }
 
-    public static void insertionSortInt(Array<int> arr) {
-        int n = arr.size();
+    public static void insertionSortInt(Array<int> values) {
+        int n = values.size();
         for (int i = 1; i < n; i = i + 1) {
-            int key = arr.get(i);
+            int key = values.get(i);
             int j = i - 1;
-            while (j >= 0 && arr.get(j) > key) {
-                arr.set(j + 1, arr.get(j));
+            while (j >= 0 && values.get(j) > key) {
+                values.set(j + 1, values.get(j));
                 j = j - 1;
             }
-            arr.set(j + 1, key);
+            values.set(j + 1, key);
         }
+    }
+
+    public static bool isSortedInt(Array<int> values) {
+        int n = values.size();
+        for (int i = 1; i < n; i = i + 1) {
+            if (values.get(i - 1) > values.get(i)) return false;
+        }
+        return true;
     }
 }
 
 public class Search {
-    public static int linearSearchInt(Array<int> arr, int target) {
-        int n = arr.size();
+    public static int linearSearchInt(Array<int> values, int target) {
+        int n = values.size();
         for (int i = 0; i < n; i = i + 1) {
-            if (arr.get(i) == target) {
-                return i;
-            }
+            if (values.get(i) == target) return i;
         }
         return -1;
     }
 
-    public static int binarySearchInt(Array<int> arr, int target) {
+    public static int binarySearchInt(Array<int> values, int target) {
         int left = 0;
-        int right = arr.size() - 1;
+        int right = values.size() - 1;
         while (left <= right) {
-            int mid = left + right;
-            mid = mid / 2;
-            int midVal = arr.get(mid);
-            if (midVal == target) {
-                return mid;
-            }
-            if (midVal < target) {
+            int mid = left + (right - left) / 2;
+            int current = values.get(mid);
+            if (current == target) return mid;
+            if (current < target) {
                 left = mid + 1;
             } else {
                 right = mid - 1;
@@ -76,123 +85,127 @@ public class Search {
         return -1;
     }
 
-    public static int maxInt(Array<int> arr) {
-        int n = arr.size();
-        if (n == 0) return 0;
-        int max = arr.get(0);
-        for (int i = 1; i < n; i = i + 1) {
-            int val = arr.get(i);
-            if (val > max) {
-                max = val;
-            }
-        }
-        return max;
+    public static bool containsInt(Array<int> values, int target) {
+        return Search.linearSearchInt(values, target) >= 0;
     }
 
-    public static int minInt(Array<int> arr) {
-        int n = arr.size();
-        if (n == 0) return 0;
-        int min = arr.get(0);
-        for (int i = 1; i < n; i = i + 1) {
-            int val = arr.get(i);
-            if (val < min) {
-                min = val;
+    public static int lowerBoundInt(Array<int> values, int target) {
+        int left = 0;
+        int right = values.size();
+        while (left < right) {
+            int mid = left + (right - left) / 2;
+            if (values.get(mid) < target) {
+                left = mid + 1;
+            } else {
+                right = mid;
             }
         }
-        return min;
+        return left;
     }
 
-    public static int maxIndexInt(Array<int> arr) {
-        int n = arr.size();
-        if (n == 0) return -1;
-        int maxIdx = 0;
-        for (int i = 1; i < n; i = i + 1) {
-            if (arr.get(i) > arr.get(maxIdx)) {
-                maxIdx = i;
+    public static int upperBoundInt(Array<int> values, int target) {
+        int left = 0;
+        int right = values.size();
+        while (left < right) {
+            int mid = left + (right - left) / 2;
+            if (values.get(mid) <= target) {
+                left = mid + 1;
+            } else {
+                right = mid;
             }
         }
-        return maxIdx;
-    }
-
-    public static int minIndexInt(Array<int> arr) {
-        int n = arr.size();
-        if (n == 0) return -1;
-        int minIdx = 0;
-        for (int i = 1; i < n; i = i + 1) {
-            if (arr.get(i) < arr.get(minIdx)) {
-                minIdx = i;
-            }
-        }
-        return minIdx;
+        return left;
     }
 }
 
 public class ArrayUtils {
-    public static void reverseInt(Array<int> arr) {
+    public static void reverseInt(Array<int> values) {
         int left = 0;
-        int right = arr.size() - 1;
+        int right = values.size() - 1;
         while (left < right) {
-            int temp = arr.get(left);
-            arr.set(left, arr.get(right));
-            arr.set(right, temp);
+            Sort.swapInt(values, left, right);
             left = left + 1;
             right = right - 1;
         }
     }
 
-    public static void fillInt(Array<int> arr, int value) {
-        int n = arr.size();
+    public static void fillInt(Array<int> values, int value) {
+        int n = values.size();
         for (int i = 0; i < n; i = i + 1) {
-            arr.set(i, value);
+            values.set(i, value);
         }
     }
 
-    public static Array<int> copyInt(Array<int> arr) {
-        Array<int> result = new Array();
-        int n = arr.size();
+    public static Array<int> copyInt(Array<int> values) {
+        Array<int> result = new Array(sizeof(int));
+        int n = values.size();
         for (int i = 0; i < n; i = i + 1) {
-            result.add(arr.get(i));
+            result.add(values.get(i));
         }
         return result;
     }
 
-    public static int sumInt(Array<int> arr) {
+    public static Array<int> range(int start, int end) {
+        Array<int> result = new Array(sizeof(int));
+        for (int value = start; value < end; value = value + 1) {
+            result.add(value);
+        }
+        return result;
+    }
+
+    public static int sumInt(Array<int> values) {
         int total = 0;
-        int n = arr.size();
+        int n = values.size();
         for (int i = 0; i < n; i = i + 1) {
-            total = total + arr.get(i);
+            total = total + values.get(i);
         }
         return total;
     }
 
-    public static double averageInt(Array<int> arr) {
-        int n = arr.size();
+    public static double averageInt(Array<int> values) {
+        int n = values.size();
         if (n == 0) return 0.0;
-        return (double)ArrayUtils.sumInt(arr) / n;
+        return (double)ArrayUtils.sumInt(values) / n;
     }
 
-    public static bool containsInt(Array<int> arr, int value) {
-        return Search.linearSearchInt(arr, value) >= 0;
+    public static int minInt(Array<int> values) {
+        int n = values.size();
+        if (n == 0) return 0;
+        int best = values.get(0);
+        for (int i = 1; i < n; i = i + 1) {
+            int value = values.get(i);
+            if (value < best) best = value;
+        }
+        return best;
     }
 
-    public static int countInt(Array<int> arr, int value) {
+    public static int maxInt(Array<int> values) {
+        int n = values.size();
+        if (n == 0) return 0;
+        int best = values.get(0);
+        for (int i = 1; i < n; i = i + 1) {
+            int value = values.get(i);
+            if (value > best) best = value;
+        }
+        return best;
+    }
+
+    public static int countInt(Array<int> values, int target) {
         int count = 0;
-        int n = arr.size();
+        int n = values.size();
         for (int i = 0; i < n; i = i + 1) {
-            if (arr.get(i) == value) {
-                count = count + 1;
-            }
+            if (values.get(i) == target) count = count + 1;
         }
         return count;
     }
 
-    public static Array<int> uniqueInt(Array<int> arr) {
-        Array<int> result = new Array();
-        int n = arr.size();
+    public static Array<int> uniqueInt(Array<int> values) {
+        Array<int> result = new Array(sizeof(int));
+        int n = values.size();
         for (int i = 0; i < n; i = i + 1) {
-            int val = arr.get(i);
-            if (!ArrayUtils.containsInt(result, val)) {
-                result.add(val);
+            int value = values.get(i);
+            if (!Search.containsInt(result, value)) {
+                result.add(value);
             }
         }
         return result;

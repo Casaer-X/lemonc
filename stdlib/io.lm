@@ -4,20 +4,36 @@
 package io;
 
 public class Console {
-    public static void print(String msg) {
-        printf("%s", msg);
+    public static void print(String value) {
+        printf("%s", value);
     }
 
-    public static void println(String msg) {
-        printf("%s\n", msg);
+    public static void println(String value) {
+        printf("%s\n", value);
     }
 
     public static void printInt(int value) {
         printf("%d", value);
     }
 
+    public static void printlnInt(int value) {
+        printf("%d\n", value);
+    }
+
+    public static void printLong(long value) {
+        printf("%ld", value);
+    }
+
+    public static void printlnLong(long value) {
+        printf("%ld\n", value);
+    }
+
     public static void printDouble(double value) {
         printf("%f", value);
+    }
+
+    public static void printlnDouble(double value) {
+        printf("%f\n", value);
     }
 
     public static void printBool(bool value) {
@@ -28,11 +44,54 @@ public class Console {
         }
     }
 
-    public static void printChar(int c) {
-        printf("%c", c);
+    public static void printlnBool(bool value) {
+        Console.printBool(value);
+        Console.newLine();
+    }
+
+    public static void printChar(char value) {
+        printf("%c", value);
+    }
+
+    public static void printlnChar(char value) {
+        printf("%c\n", value);
     }
 
     public static void newLine() {
         printf("\n");
+    }
+
+    public static void space() {
+        printf(" ");
+    }
+
+    public static int readInt() {
+        int value = 0;
+        scanf("%d", &value);
+        return value;
+    }
+
+    public static double readDouble() {
+        double value = 0.0;
+        scanf("%lf", &value);
+        return value;
+    }
+
+    public static char readChar() {
+        return getchar();
+    }
+}
+
+public class Format {
+    public static void printLabelInt(String label, int value) {
+        printf("%s%d\n", label, value);
+    }
+
+    public static void printLabelDouble(String label, double value) {
+        printf("%s%f\n", label, value);
+    }
+
+    public static void printLabelString(String label, String value) {
+        printf("%s%s\n", label, value);
     }
 }

@@ -37,6 +37,12 @@
   - [3.10 内建类型与方法](#310-内建类型与方法)
   - [3.11 注解](#311-注解)
   - [3.12 其他特性](#312-其他特性)
+  - [3.13 枚举类型](#313-枚举类型)
+  - [3.14 Match 表达式](#314-match-表达式)
+  - [3.15 Switch 语句](#315-switch-语句)
+  - [3.16 For-Each 循环](#316-for-each-循环)
+  - [3.17 字符串拼接](#317-字符串拼接)
+  - [3.18 标准库类](#318-标准库类)
 - [第四部分：完整示例](#第四部分完整示例)
   - [示例 1：Hello World](#示例-1hello-world)
   - [示例 2：继承与多态](#示例-2继承与多态)
@@ -516,7 +522,7 @@ package math;
 public class Utils {
     public static int factorial(int n) {
         if (n <= 1) return 1;
-        return n * factorial(n - 1);
+        return n * Utils.factorial(n - 1);
     }
 }
 ```
@@ -1347,6 +1353,420 @@ int size = sizeof(int);     // 获取 int 类型大小
 TypeInfo* t = typeid(obj);  // 获取对象的类型信息
 ```
 
+## 3.13 枚举类型
+
+Lemon 支持枚举类型（Enum），包括简单枚举和带载荷的标签联合体（Tagged Union）两种形式。
+
+### 简单枚举
+
+不含载荷的枚举，用于定义一组命名常量：
+
+```
+enum Color {
+    Red,
+    Green,
+    Blue
+}
+```
+
+使用枚举变体：
+
+```
+Color c = Color.Red;
+if (c == Color.Green) {
+    printf("It's green!\n");
+}
+```
+
+### 带载荷的枚举（标签联合体）
+
+枚举变体可以携带数据，形成标签联合体，适用于表示多种可能的数据形态：
+
+```
+enum TokenKind {
+    Identifier(String),
+    IntegerLiteral(long),
+    StringLiteral(String)
+}
+```
+
+创建带载荷的枚举变体：
+
+```
+TokenKind kind = TokenKind.Identifier("foo");
+TokenKind num = TokenKind.IntegerLiteral(42);
+TokenKind str = TokenKind.StringLiteral("hello");
+```
+
+带载荷的枚举通常与 `match` 表达式配合使用，以解构并处理不同变体中的数据。详见 [3.14 Match 表达式](#314-match-表达式)。
+
+### 枚举修饰符
+
+| 修饰符 | 说明 |
+|--------|------|
+| `public` | 公开枚举 |
+| `private` | 私有枚举 |
+
+## 3.14 Match 表达式
+
+`match` 表达式用于对值进行模式匹配，特别适合处理枚举类型。`match` 是一个表达式，会返回匹配分支的值。
+
+### 基本语法
+
+```
+match (expr) {
+    Pattern => body,
+    Pattern => body,
+    ...
+}
+```
+
+### 变体模式与绑定
+
+对带载荷的枚举变体进行匹配，并绑定载荷数据：
+
+```
+TokenKind kind = TokenKind.Identifier("foo");
+
+String result = match (kind) {
+    TokenKind.Identifier(name) => "Identifier: " + name,
+    TokenKind.IntegerLiteral(value) => String.intToString(value),
+    TokenKind.StringLiteral(s) => "String: " + s
+};
+```
+
+在变体模式 `TokenKind.Identifier(name)` 中，`name` 是一个绑定变量，它会被赋值为该变体携带的数据。
+
+### 通配符模式
+
+使用 `_` 匹配任意值，通常用于处理剩余情况：
+
+```
+Color c = Color.Red;
+
+match (c) {
+    Color.Red => printf("Red\n"),
+    _ => printf("Not red\n")
+}
+```
+
+### 或模式
+
+使用 `|` 将多个模式合并为一个分支：
+
+```
+enum Status {
+    Ok,
+    Warning,
+    Error,
+    Fatal
+}
+
+Status s = Status.Warning;
+
+match (s) {
+    Status.Ok => printf("All good\n"),
+    Status.Warning | Status.Error => printf("Issue detected\n"),
+    Status.Fatal => printf("Critical failure\n")
+}
+```
+
+### match 表达式规则
+
+| 规则 | 说明 |
+|------|------|
+| 必须穷举 | 所有枚举变体都必须被匹配，或使用 `_` 通配 |
+| 绑定变量 | 变体模式中的变量名在当前分支内可用 |
+| 返回值 | match 是表达式，每个分支的返回类型应一致 |
+| 优先匹配 | 按从上到下的顺序匹配，第一个匹配的分支生效 |
+
+## 3.15 Switch 语句
+
+`switch` 语句用于根据一个值的多情况分支选择执行路径。与 `match` 不同，`switch` 是语句而非表达式，且需要使用 `break` 显式退出。
+
+### 基本语法
+
+```
+switch (expr) {
+    case value1:
+        // 语句
+        break;
+    case value2:
+        // 语句
+        break;
+    default:
+        // 默认语句
+        break;
+}
+```
+
+### 使用示例
+
+```
+int day = 3;
+
+switch (day) {
+    case 1:
+        printf("Monday\n");
+        break;
+    case 2:
+        printf("Tuesday\n");
+        break;
+    case 3:
+        printf("Wednesday\n");
+        break;
+    default:
+        printf("Other day\n");
+        break;
+}
+```
+
+### switch 与 match 的区别
+
+| 特性 | switch | match |
+|------|--------|-------|
+| 类型 | 语句 | 表达式 |
+| 返回值 | 无 | 有 |
+| 模式匹配 | 仅支持值比较 | 支持变体解构、绑定、通配符 |
+| 贯穿行为 | 需要 `break` 防止贯穿 | 无贯穿，每次只匹配一个分支 |
+| 适用场景 | 简单值分支 | 枚举模式匹配、数据解构 |
+
+## 3.16 For-Each 循环
+
+`for-each` 循环用于遍历集合类型（如数组、列表等）中的元素。
+
+### 基本语法
+
+```
+for (Type item in collection) {
+    // 使用 item
+}
+```
+
+### 使用示例
+
+遍历数组：
+
+```
+int[] numbers = {1, 2, 3, 4, 5};
+
+for (int num in numbers) {
+    printf("%d\n", num);
+}
+```
+
+遍历动态数组：
+
+```
+Array<String> names = new Array();
+names.add("Alice");
+names.add("Bob");
+names.add("Charlie");
+
+for (String name in names) {
+    printf("Hello, %s!\n", name);
+}
+```
+
+### for-each 与 for 循环的对比
+
+| 特性 | for 循环 | for-each 循环 |
+|------|----------|---------------|
+| 语法 | `for (init; cond; step)` | `for (Type item in collection)` |
+| 索引访问 | 可用 | 不可用 |
+| 修改集合 | 可用 | 不推荐 |
+| 适用场景 | 需要索引控制 | 简单遍历集合元素 |
+
+## 3.17 字符串拼接
+
+Lemon 支持 `+` 运算符进行字符串拼接，并支持自动类型转换。
+
+### 字符串与字符串拼接
+
+```
+String s = "Hello" + " " + "World";
+printf("%s\n", s);  // 输出：Hello World
+```
+
+### 字符串与数值拼接（自动转换）
+
+当 `+` 运算符的一侧为 `String` 类型时，另一侧的值会自动转换为字符串：
+
+```
+String s1 = "Value: " + 42;         // "Value: 42"
+String s2 = "Pi: " + 3.14;          // "Pi: 3.14"
+String s3 = "Flag: " + true;        // "Flag: true"
+String s4 = "Count: " + count;      // 变量也会自动转换
+```
+
+### 拼接规则
+
+| 左操作数 | 右操作数 | 结果 | 说明 |
+|----------|----------|------|------|
+| String | String | String | 直接拼接 |
+| String | int/long | String | 数值自动转为字符串 |
+| String | float/double | String | 浮点数自动转为字符串 |
+| String | bool | String | 布尔值自动转为字符串 |
+| int/long | String | String | 数值自动转为字符串 |
+
+**注意**：两个非字符串类型之间的 `+` 仍然是算术加法，不会触发字符串拼接。
+
+## 3.18 标准库类
+
+Lemon 提供了一组标准库类，用于常见的字符串构建、文件 I/O 和字符操作等任务。
+
+### StringBuilder
+
+`StringBuilder` 用于高效构建字符串，避免频繁创建字符串对象带来的性能开销。
+
+#### 创建 StringBuilder
+
+```
+StringBuilder sb = new StringBuilder();
+```
+
+#### 方法列表
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `append` | `void append(String s)` | 追加字符串 |
+| `appendChar` | `void appendChar(char c)` | 追加单个字符 |
+| `appendInt` | `void appendInt(int v)` | 追加整数的字符串表示 |
+| `appendLong` | `void appendLong(long v)` | 追加长整数的字符串表示 |
+| `appendFloat` | `void appendFloat(float v)` | 追加浮点数的字符串表示 |
+| `appendDouble` | `void appendDouble(double v)` | 追加双精度浮点数的字符串表示 |
+| `appendBool` | `void appendBool(bool v)` | 追加布尔值的字符串表示 |
+| `appendLine` | `void appendLine(String s)` | 追加字符串并换行 |
+| `toString` | `String toString()` | 获取构建的字符串 |
+| `length` | `int length()` | 获取当前长度 |
+| `clear` | `void clear()` | 清空内容 |
+| `charAt` | `char charAt(int index)` | 获取指定位置的字符 |
+| `setCharAt` | `void setCharAt(int index, char c)` | 设置指定位置的字符 |
+| `deleteCharAt` | `void deleteCharAt(int index)` | 删除指定位置的字符 |
+| `insert` | `void insert(int index, String s)` | 在指定位置插入字符串 |
+
+#### 使用示例
+
+```
+StringBuilder sb = new StringBuilder();
+sb.append("Name: ");
+sb.append("Alice");
+sb.append(", Age: ");
+sb.appendInt(25);
+sb.appendLine("");
+sb.append("Status: active");
+String result = sb.toString();
+printf("%s\n", result);
+```
+
+### File I/O
+
+`File` 类提供文件读写操作。
+
+#### 打开与关闭文件
+
+```
+File f = File.open("data.txt", "r");  // 以只读模式打开
+// ... 读写操作 ...
+File.close(f);
+```
+
+打开模式与 C 语言的 `fopen` 一致：
+
+| 模式 | 说明 |
+|------|------|
+| `"r"` | 只读打开，文件必须存在 |
+| `"w"` | 只写打开，文件不存在则创建，存在则截断 |
+| `"a"` | 追加打开，文件不存在则创建 |
+| `"r+"` | 读写打开，文件必须存在 |
+| `"w+"` | 读写打开，文件不存在则创建，存在则截断 |
+| `"a+"` | 读写追加打开，文件不存在则创建 |
+
+#### 方法列表
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `open` | `static File open(String path, String mode)` | 打开文件 |
+| `close` | `static void close(File f)` | 关闭文件 |
+| `readAll` | `static String readAll(String path)` | 读取文件全部内容 |
+| `readLine` | `static String readLine(File f)` | 读取一行 |
+| `write` | `static void write(File f, String s)` | 写入字符串 |
+| `writeLine` | `static void writeLine(File f, String s)` | 写入一行（带换行） |
+| `exists` | `static bool exists(String path)` | 检查文件是否存在 |
+| `delete` | `static bool delete(String path)` | 删除文件 |
+| `rename` | `static bool rename(String oldPath, String newPath)` | 重命名文件 |
+| `size` | `static long size(String path)` | 获取文件大小 |
+| `isFile` | `static bool isFile(String path)` | 检查是否为文件 |
+| `isDirectory` | `static bool isDirectory(String path)` | 检查是否为目录 |
+
+#### 使用示例
+
+读取文件全部内容：
+
+```
+String content = File.readAll("input.txt");
+printf("%s\n", content);
+```
+
+逐行读取文件：
+
+```
+File f = File.open("data.txt", "r");
+String line = File.readLine(f);
+while (line != null) {
+    printf("Line: %s\n", line);
+    line = File.readLine(f);
+}
+File.close(f);
+```
+
+写入文件：
+
+```
+File f = File.open("output.txt", "w");
+File.writeLine(f, "Hello, Lemon!");
+File.write(f, "Appended text");
+File.close(f);
+```
+
+### Character
+
+`Character` 类提供字符分类和转换的静态方法。
+
+#### 方法列表
+
+| 方法 | 签名 | 说明 |
+|------|------|------|
+| `isDigit` | `static bool isDigit(char c)` | 判断是否为数字字符 |
+| `isLetter` | `static bool isLetter(char c)` | 判断是否为字母字符 |
+| `isLetterOrDigit` | `static bool isLetterOrDigit(char c)` | 判断是否为字母或数字 |
+| `isUpperCase` | `static bool isUpperCase(char c)` | 判断是否为大写字母 |
+| `isLowerCase` | `static bool isLowerCase(char c)` | 判断是否为小写字母 |
+| `isWhitespace` | `static bool isWhitespace(char c)` | 判断是否为空白字符 |
+| `toUpperCase` | `static char toUpperCase(char c)` | 转换为大写字母 |
+| `toLowerCase` | `static char toLowerCase(char c)` | 转换为小写字母 |
+| `isAlphaNumeric` | `static bool isAlphaNumeric(char c)` | 判断是否为字母数字字符 |
+| `getNumericValue` | `static int getNumericValue(char c)` | 获取数字字符的数值 |
+
+#### 使用示例
+
+```
+char c = 'A';
+
+if (Character.isLetter(c)) {
+    printf("%c is a letter\n", c);
+}
+
+char lower = Character.toLowerCase(c);
+printf("Lowercase: %c\n", lower);  // 输出：a
+
+char digit = '5';
+if (Character.isDigit(digit)) {
+    int value = Character.getNumericValue(digit);
+    printf("Numeric value: %d\n", value);  // 输出：5
+}
+```
+
 ---
 
 # 第四部分：完整示例
@@ -1465,26 +1885,28 @@ class MyError {
     }
 }
 
-int main() {
-    try {
-        printf("Before throw\n");
-        throw new MyError(42, "something went wrong");
-        printf("After throw - should not reach here\n");
-    } catch (MyError e) {
-        printf("Caught MyError: code=%d\n", e.code);
-    }
+public class ExceptionDemo {
+    public static void main(String[] args) {
+        try {
+            printf("Before throw\n");
+            throw new MyError(42, "something went wrong");
+            printf("After throw - should not reach here\n");
+        } catch (MyError e) {
+            printf("Caught MyError: code=%d\n", e.code);
+        }
 
-    try {
-        printf("Try block 2\n");
-        throw new MyError(99, "another error");
-    } catch (MyError e) {
-        printf("Caught another MyError: code=%d\n", e.code);
-    } finally {
-        printf("Finally block executed\n");
-    }
+        try {
+            printf("Try block 2\n");
+            throw new MyError(99, "another error");
+        } catch (MyError e) {
+            printf("Caught another MyError: code=%d\n", e.code);
+        } finally {
+            printf("Finally block executed\n");
+        }
 
-    printf("All tests passed\n");
-    return 0;
+        printf("All tests passed\n");
+        return 0;
+    }
 }
 ```
 

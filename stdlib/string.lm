@@ -4,42 +4,80 @@
 package string;
 
 public class StringUtils {
-    public static bool isEmpty(String s) {
-        return s.length() == 0;
+    public static bool isEmpty(String value) {
+        return value.length() == 0;
     }
 
-    public static bool isBlank(String s) {
-        String trimmed = s.trim();
-        return trimmed.length() == 0;
+    public static bool isNotEmpty(String value) {
+        return value.length() != 0;
     }
 
-    public static bool startsWith(String s, String prefix) {
-        int sLen = s.length();
-        int pLen = prefix.length();
-        if (pLen > sLen) return false;
-        return s.indexOf(prefix) == 0;
+    public static bool isBlank(String value) {
+        return value.trim().length() == 0;
     }
 
-    public static bool endsWith(String s, String suffix) {
-        int sLen = s.length();
-        int sufLen = suffix.length();
-        if (sufLen > sLen) return false;
-        int idx = s.indexOf(suffix);
-        return idx == sLen - sufLen;
+    public static bool isNotBlank(String value) {
+        return !StringUtils.isBlank(value);
     }
 
-    public static bool contains(String s, String substr) {
-        return s.indexOf(substr) >= 0;
+    public static bool equals(String a, String b) {
+        return a.equals(b);
     }
 
-    public static int countOccurrences(String s, String substr) {
+    public static bool startsWith(String value, String prefix) {
+        int valueLength = value.length();
+        int prefixLength = prefix.length();
+        if (prefixLength > valueLength) return false;
+        return value.indexOf(prefix) == 0;
+    }
+
+    public static bool endsWith(String value, String suffix) {
+        int valueLength = value.length();
+        int suffixLength = suffix.length();
+        if (suffixLength > valueLength) return false;
+        String tail = value.substring(valueLength - suffixLength, valueLength);
+        return tail.equals(suffix);
+    }
+
+    public static bool contains(String value, String part) {
+        return value.indexOf(part) >= 0;
+    }
+
+    public static String trim(String value) {
+        return value.trim();
+    }
+
+    public static String toUpperCase(String value) {
+        return value.toUpperCase();
+    }
+
+    public static String toLowerCase(String value) {
+        return value.toLowerCase();
+    }
+
+    public static String substring(String value, int start, int end) {
+        return value.substring(start, end);
+    }
+
+    public static String replace(String value, String oldValue, String newValue) {
+        return value.replace(oldValue, newValue);
+    }
+
+    public static int indexOf(String value, String part) {
+        return value.indexOf(part);
+    }
+
+    public static int countOccurrences(String value, String part) {
+        if (part.length() == 0) return 0;
         int count = 0;
-        String temp = s;
-        while (true) {
-            int found = temp.indexOf(substr);
-            if (found < 0) break;
+        int offset = 0;
+        int partLength = part.length();
+        while (offset < value.length()) {
+            String rest = value.substring(offset, value.length());
+            int found = rest.indexOf(part);
+            if (found < 0) return count;
             count = count + 1;
-            temp = temp.substring(found + substr.length(), temp.length());
+            offset = offset + found + partLength;
         }
         return count;
     }
@@ -48,12 +86,48 @@ public class StringUtils {
         return String.intToString(value);
     }
 
-    public static int stringToInt(String s) {
-        return s.toInt();
+    public static int stringToInt(String value) {
+        return value.toInt();
     }
 
     public static String boolToString(bool value) {
         if (value) return "true";
         return "false";
+    }
+}
+
+public class CharUtils {
+    public static bool isDigit(char value) {
+        return value >= '0' && value <= '9';
+    }
+
+    public static bool isLower(char value) {
+        return value >= 'a' && value <= 'z';
+    }
+
+    public static bool isUpper(char value) {
+        return value >= 'A' && value <= 'Z';
+    }
+
+    public static bool isAlpha(char value) {
+        return CharUtils.isLower(value) || CharUtils.isUpper(value);
+    }
+
+    public static bool isAlphaNumeric(char value) {
+        return CharUtils.isAlpha(value) || CharUtils.isDigit(value);
+    }
+
+    public static bool isWhitespace(char value) {
+        return value == ' ' || value == '\t' || value == '\n' || value == '\r';
+    }
+
+    public static char toLower(char value) {
+        if (CharUtils.isUpper(value)) return (char)(value + 32);
+        return value;
+    }
+
+    public static char toUpper(char value) {
+        if (CharUtils.isLower(value)) return (char)(value - 32);
+        return value;
     }
 }

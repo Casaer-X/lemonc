@@ -20,6 +20,8 @@ pub struct CCodeGen {
     generic_instances: HashMap<String, Vec<Vec<TypeRef>>>,
     generic_classes: HashMap<String, ClassDecl>,
     method_signatures: HashMap<String, Vec<(String, Vec<TypeRef>)>>,
+    enums: HashMap<String, EnumDecl>,
+    match_counter: u32,
 }
 
 struct VirtualMethodEntry {
@@ -74,6 +76,8 @@ impl CCodeGen {
             generic_instances: HashMap::new(),
             generic_classes: HashMap::new(),
             method_signatures: HashMap::new(),
+            enums: HashMap::new(),
+            match_counter: 0,
         }
     }
 
@@ -259,6 +263,175 @@ impl CCodeGen {
         self.emit_line("    if (!s) return 0;");
         self.emit_line("    return (int32_t)atoi(s);");
         self.emit_line("}");
+        self.emit_line("char* String_concat(const char* a, const char* b) {");
+        self.emit_line("    if (!a && !b) return strdup(\"\");");
+        self.emit_line("    if (!a) return strdup(b);");
+        self.emit_line("    if (!b) return strdup(a);");
+        self.emit_line("    size_t alen = strlen(a), blen = strlen(b);");
+        self.emit_line("    char* r = (char*)malloc(alen + blen + 1);");
+        self.emit_line("    memcpy(r, a, alen);");
+        self.emit_line("    memcpy(r + alen, b, blen + 1);");
+        self.emit_line("    return r;");
+        self.emit_line("}");
+        self.emit_line("char String_charAt(const char* s, int idx) {");
+        self.emit_line("    if (!s || idx < 0 || idx >= (int)strlen(s)) return '\\0';");
+        self.emit_line("    return s[idx];");
+        self.emit_line("}");
+        self.emit_line("");
+
+        self.emit_line("typedef struct StringBuilder {");
+        self.emit_line("    char* buffer;");
+        self.emit_line("    int32_t length;");
+        self.emit_line("    int32_t capacity;");
+        self.emit_line("} StringBuilder;");
+        self.emit_line("");
+        self.emit_line("StringBuilder* StringBuilder_new() {");
+        self.emit_line("    StringBuilder* sb = (StringBuilder*)malloc(sizeof(StringBuilder));");
+        self.emit_line("    sb->capacity = 64;");
+        self.emit_line("    sb->length = 0;");
+        self.emit_line("    sb->buffer = (char*)malloc(sb->capacity);");
+        self.emit_line("    sb->buffer[0] = '\\0';");
+        self.emit_line("    return sb;");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_ensureCapacity(StringBuilder* sb, int32_t needed) {");
+        self.emit_line("    if (sb->length + needed >= sb->capacity) {");
+        self.emit_line("        while (sb->length + needed >= sb->capacity) sb->capacity *= 2;");
+        self.emit_line("        sb->buffer = (char*)realloc(sb->buffer, sb->capacity);");
+        self.emit_line("    }");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_append(StringBuilder* sb, const char* s) {");
+        self.emit_line("    if (!s) return;");
+        self.emit_line("    int32_t slen = (int32_t)strlen(s);");
+        self.emit_line("    StringBuilder_ensureCapacity(sb, slen);");
+        self.emit_line("    memcpy(sb->buffer + sb->length, s, slen + 1);");
+        self.emit_line("    sb->length += slen;");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_appendChar(StringBuilder* sb, char c) {");
+        self.emit_line("    StringBuilder_ensureCapacity(sb, 1);");
+        self.emit_line("    sb->buffer[sb->length++] = c;");
+        self.emit_line("    sb->buffer[sb->length] = '\\0';");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_appendInt(StringBuilder* sb, int32_t v) {");
+        self.emit_line("    char tmp[32];");
+        self.emit_line("    snprintf(tmp, sizeof(tmp), \"%d\", v);");
+        self.emit_line("    StringBuilder_append(sb, tmp);");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_appendLong(StringBuilder* sb, int64_t v) {");
+        self.emit_line("    char tmp[32];");
+        self.emit_line("    snprintf(tmp, sizeof(tmp), \"%lld\", (long long)v);");
+        self.emit_line("    StringBuilder_append(sb, tmp);");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_appendFloat(StringBuilder* sb, float v) {");
+        self.emit_line("    char tmp[32];");
+        self.emit_line("    snprintf(tmp, sizeof(tmp), \"%g\", (double)v);");
+        self.emit_line("    StringBuilder_append(sb, tmp);");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_appendDouble(StringBuilder* sb, double v) {");
+        self.emit_line("    char tmp[32];");
+        self.emit_line("    snprintf(tmp, sizeof(tmp), \"%g\", v);");
+        self.emit_line("    StringBuilder_append(sb, tmp);");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_appendBool(StringBuilder* sb, int32_t v) {");
+        self.emit_line("    StringBuilder_append(sb, v ? \"true\" : \"false\");");
+        self.emit_line("}");
+        self.emit_line("const char* StringBuilder_toString(StringBuilder* sb) {");
+        self.emit_line("    return strdup(sb->buffer);");
+        self.emit_line("}");
+        self.emit_line("int32_t StringBuilder_length(StringBuilder* sb) {");
+        self.emit_line("    return sb->length;");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_setCharAt(StringBuilder* sb, int32_t idx, char c) {");
+        self.emit_line("    if (idx >= 0 && idx < sb->length) sb->buffer[idx] = c;");
+        self.emit_line("}");
+        self.emit_line("char StringBuilder_charAt(StringBuilder* sb, int32_t idx) {");
+        self.emit_line("    if (idx >= 0 && idx < sb->length) return sb->buffer[idx];");
+        self.emit_line("    return '\\0';");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_deleteCharAt(StringBuilder* sb, int32_t idx) {");
+        self.emit_line("    if (idx >= 0 && idx < sb->length) {");
+        self.emit_line("        memmove(sb->buffer + idx, sb->buffer + idx + 1, sb->length - idx);");
+        self.emit_line("        sb->length--;");
+        self.emit_line("    }");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_insert(StringBuilder* sb, int32_t idx, const char* s) {");
+        self.emit_line("    if (!s || idx < 0 || idx > sb->length) return;");
+        self.emit_line("    int32_t slen = (int32_t)strlen(s);");
+        self.emit_line("    StringBuilder_ensureCapacity(sb, slen);");
+        self.emit_line("    memmove(sb->buffer + idx + slen, sb->buffer + idx, sb->length - idx + 1);");
+        self.emit_line("    memcpy(sb->buffer + idx, s, slen);");
+        self.emit_line("    sb->length += slen;");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_clear(StringBuilder* sb) {");
+        self.emit_line("    sb->length = 0;");
+        self.emit_line("    sb->buffer[0] = '\\0';");
+        self.emit_line("}");
+        self.emit_line("void StringBuilder_free(StringBuilder* sb) {");
+        self.emit_line("    free(sb->buffer);");
+        self.emit_line("    free(sb);");
+        self.emit_line("}");
+        self.emit_line("");
+
+        self.emit_line("typedef struct LemonFile {");
+        self.emit_line("    FILE* handle;");
+        self.emit_line("} LemonFile;");
+        self.emit_line("");
+        self.emit_line("LemonFile* File_open(const char* path, const char* mode) {");
+        self.emit_line("    FILE* f = fopen(path, mode);");
+        self.emit_line("    if (!f) return NULL;");
+        self.emit_line("    LemonFile* lf = (LemonFile*)malloc(sizeof(LemonFile));");
+        self.emit_line("    lf->handle = f;");
+        self.emit_line("    return lf;");
+        self.emit_line("}");
+        self.emit_line("void File_close(LemonFile* lf) {");
+        self.emit_line("    if (lf && lf->handle) { fclose(lf->handle); lf->handle = NULL; }");
+        self.emit_line("}");
+        self.emit_line("const char* File_readAll(LemonFile* lf) {");
+        self.emit_line("    if (!lf || !lf->handle) return strdup(\"\");");
+        self.emit_line("    fseek(lf->handle, 0, SEEK_END);");
+        self.emit_line("    long sz = ftell(lf->handle);");
+        self.emit_line("    fseek(lf->handle, 0, SEEK_SET);");
+        self.emit_line("    char* buf = (char*)malloc(sz + 1);");
+        self.emit_line("    size_t rd = fread(buf, 1, sz, lf->handle);");
+        self.emit_line("    buf[rd] = '\\0';");
+        self.emit_line("    return buf;");
+        self.emit_line("}");
+        self.emit_line("const char* File_readLine(LemonFile* lf) {");
+        self.emit_line("    if (!lf || !lf->handle) return strdup(\"\");");
+        self.emit_line("    char buf[4096];");
+        self.emit_line("    if (!fgets(buf, sizeof(buf), lf->handle)) return NULL;");
+        self.emit_line("    int32_t len = (int32_t)strlen(buf);");
+        self.emit_line("    if (len > 0 && buf[len-1] == '\\n') buf[--len] = '\\0';");
+        self.emit_line("    if (len > 0 && buf[len-1] == '\\r') buf[--len] = '\\0';");
+        self.emit_line("    return strdup(buf);");
+        self.emit_line("}");
+        self.emit_line("void File_write(LemonFile* lf, const char* s) {");
+        self.emit_line("    if (lf && lf->handle && s) fputs(s, lf->handle);");
+        self.emit_line("}");
+        self.emit_line("void File_writeLine(LemonFile* lf, const char* s) {");
+        self.emit_line("    if (lf && lf->handle && s) { fputs(s, lf->handle); fputc('\\n', lf->handle); }");
+        self.emit_line("}");
+        self.emit_line("int32_t File_hasNextLine(LemonFile* lf) {");
+        self.emit_line("    if (!lf || !lf->handle) return 0;");
+        self.emit_line("    int c = fgetc(lf->handle);");
+        self.emit_line("    if (c == EOF) return 0;");
+        self.emit_line("    ungetc(c, lf->handle);");
+        self.emit_line("    return 1;");
+        self.emit_line("}");
+        self.emit_line("int32_t File_eof(LemonFile* lf) {");
+        self.emit_line("    if (!lf || !lf->handle) return 1;");
+        self.emit_line("    return feof(lf->handle);");
+        self.emit_line("}");
+        self.emit_line("");
+
+        self.emit_line("int32_t Character_isDigit(char c) { return c >= '0' && c <= '9'; }");
+        self.emit_line("int32_t Character_isLetter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }");
+        self.emit_line("int32_t Character_isLetterOrDigit(char c) { return Character_isLetter(c) || Character_isDigit(c); }");
+        self.emit_line("int32_t Character_isWhitespace(char c) { return c == ' ' || c == '\\t' || c == '\\n' || c == '\\r'; }");
+        self.emit_line("int32_t Character_isUpperCase(char c) { return c >= 'A' && c <= 'Z'; }");
+        self.emit_line("int32_t Character_isLowerCase(char c) { return c >= 'a' && c <= 'z'; }");
+        self.emit_line("char Character_toUpperCase(char c) { if (c >= 'a' && c <= 'z') return c - 32; return c; }");
+        self.emit_line("char Character_toLowerCase(char c) { if (c >= 'A' && c <= 'Z') return c + 32; return c; }");
+        self.emit_line("int32_t Character_getNumericValue(char c) { if (c >= '0' && c <= '9') return c - '0'; return -1; }");
         self.emit_line("");
 
         self.emit_line("typedef struct LemonArray {");
@@ -403,6 +576,10 @@ impl CCodeGen {
             if let Declaration::Class(class) = decl {
                 self.emit_line(&format!("typedef struct {} {};", class.name, class.name));
             }
+            if let Declaration::Enum(enum_decl) = decl {
+                self.enums.insert(enum_decl.name.clone(), enum_decl.clone());
+                self.emit_line(&format!("typedef struct {} {};", enum_decl.name, enum_decl.name));
+            }
         }
         let generic_fwd_decl_lines: Vec<String> = {
             let mut lines = Vec::new();
@@ -466,6 +643,9 @@ impl CCodeGen {
         for decl in &ast.declarations {
             if let Declaration::Class(class) = decl {
                 self.generate_struct_def(class);
+            }
+            if let Declaration::Enum(enum_decl) = decl {
+                self.generate_enum_struct_def(enum_decl);
             }
         }
         let generic_struct_items: Vec<(ClassDecl, Vec<TypeRef>)> = {
@@ -1128,6 +1308,47 @@ impl CCodeGen {
             }
             Stmt::Break => self.emit_line("break;"),
             Stmt::Continue => self.emit_line("continue;"),
+            Stmt::Switch(subject, cases, default_body) => {
+                let subject_str = self.gen_expr(subject);
+                self.emit_line(&format!("switch ({}) {{", subject_str));
+                self.indent += 1;
+                for case in cases {
+                    for (i, pattern) in case.patterns.iter().enumerate() {
+                        let pattern_str = self.gen_expr(pattern);
+                        if i == 0 {
+                            self.emit_line(&format!("case {}:", pattern_str));
+                        } else {
+                            self.emit_line(&format!("case {}:", pattern_str));
+                        }
+                    }
+                    self.indent += 1;
+                    for s in &case.body.statements {
+                        self.generate_stmt(s);
+                    }
+                    self.emit_line("break;");
+                    self.indent -= 1;
+                }
+                if let Some(default_block) = default_body {
+                    self.emit_line("default:");
+                    self.indent += 1;
+                    for s in &default_block.statements {
+                        self.generate_stmt(s);
+                    }
+                    self.indent -= 1;
+                }
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+            Stmt::ForEach(elem_type, name, iterable, body) => {
+                let elem_c_type = self.c_type(elem_type);
+                let iterable_str = self.gen_expr(iterable);
+                self.emit_line(&format!("for (int _fe_i = 0; _fe_i < {}->length; _fe_i++) {{", iterable_str));
+                self.indent += 1;
+                self.emit_line(&format!("{} {} = ({})LemonArray_get({}, _fe_i);", elem_c_type, name, elem_c_type, iterable_str));
+                self.generate_stmt(body);
+                self.indent -= 1;
+                self.emit_line("}");
+            }
             Stmt::Try(try_block, catches, finally) => {
                 let exc_id = self.exc_counter;
                 self.exc_counter += 1;
@@ -1263,6 +1484,13 @@ impl CCodeGen {
             Expr::BinaryOp(op, left, right) => {
                 let l = self.gen_expr(left);
                 let r = self.gen_expr(right);
+                if *op == BinaryOp::Add {
+                    let left_is_string = self.expr_is_string_type(left);
+                    let right_is_string = self.expr_is_string_type(right);
+                    if left_is_string || right_is_string {
+                        return self.gen_string_concat(left, right, left_is_string, right_is_string);
+                    }
+                }
                 format!("({} {} {})", l, self.c_op(op), r)
             }
             Expr::UnaryOp(op, operand) => {
@@ -1419,6 +1647,9 @@ impl CCodeGen {
                 let type_name = self.infer_throw_type(expr);
                 format!("lemon_throw(\"{}\", (void*){})", type_name, val)
             }
+            Expr::Match(subject, arms) => {
+                self.gen_match_expr(subject, arms)
+            }
         }
     }
 
@@ -1457,6 +1688,12 @@ impl CCodeGen {
                 }
                 if ty == "LemonMap*" {
                     return "LemonMap".to_string();
+                }
+                if ty == "StringBuilder*" {
+                    return "StringBuilder".to_string();
+                }
+                if ty == "LemonFile*" {
+                    return "LemonFile".to_string();
                 }
             }
         }
@@ -1536,6 +1773,8 @@ impl CCodeGen {
                 "String" => "const char*".to_string(),
                 "Array" => "LemonArray*".to_string(),
                 "Map" => "LemonMap*".to_string(),
+                "StringBuilder" => "StringBuilder*".to_string(),
+                "LemonFile" => "LemonFile*".to_string(),
                 _ => {
                     if !type_args.is_empty() {
                         format!("{}*", self.mangled_generic_name(name, type_args))
@@ -1851,6 +2090,36 @@ impl CCodeGen {
                 }
             }
             Stmt::Break | Stmt::Continue => {}
+            Stmt::Switch(subject, cases, default_body) => {
+                self.collect_generic_instances_from_expr(subject);
+                for case in cases {
+                    for pattern in &case.patterns {
+                        self.collect_generic_instances_from_expr(pattern);
+                    }
+                    for s in &case.body.statements {
+                        self.collect_generic_instances_from_stmt(s);
+                    }
+                }
+                if let Some(default_block) = default_body {
+                    for s in &default_block.statements {
+                        self.collect_generic_instances_from_stmt(s);
+                    }
+                }
+            }
+            Stmt::ForEach(elem_type, _name, iterable, body) => {
+                if let TypeRef::Named(name, type_args) = elem_type {
+                    if !type_args.is_empty() && self.generic_classes.contains_key(name) {
+                        let exists = self.generic_instances.get(name).map_or(false, |entries| {
+                            entries.iter().any(|t| t.len() == type_args.len() && t.iter().zip(type_args.iter()).all(|(a, b)| self.types_equal(a, b)))
+                        });
+                        if !exists {
+                            self.generic_instances.entry(name.clone()).or_default().push(type_args.clone());
+                        }
+                    }
+                }
+                self.collect_generic_instances_from_expr(iterable);
+                self.collect_generic_instances_from_stmt(body);
+            }
         }
     }
 
@@ -1923,6 +2192,19 @@ impl CCodeGen {
             Expr::Sizeof(_) => {}
             Expr::TypeId(e) => {
                 self.collect_generic_instances_from_expr(e);
+            }
+            Expr::Match(subject, arms) => {
+                self.collect_generic_instances_from_expr(subject);
+                for arm in arms {
+                    match &arm.body {
+                        MatchBody::Expr(e) => self.collect_generic_instances_from_expr(e),
+                        MatchBody::Block(b) => {
+                            for s in &b.statements {
+                                self.collect_generic_instances_from_stmt(s);
+                            }
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -2253,5 +2535,285 @@ impl CCodeGen {
             }
         }
         format!("{}_{}", class_name, method_name)
+    }
+
+    fn generate_enum_struct_def(&mut self, enum_decl: &EnumDecl) {
+        self.emit_line(&format!("struct {} {{", enum_decl.name));
+        self.indent += 1;
+        self.emit_line(&format!("int kind;"));
+
+        let has_payload = enum_decl.variants.iter().any(|v| !v.fields.is_empty());
+        if has_payload {
+            self.emit_line("union {");
+            self.indent += 1;
+            for variant in &enum_decl.variants {
+                if !variant.fields.is_empty() {
+                    self.emit_line(&format!("struct {{"));
+                    self.indent += 1;
+                    for (i, field) in variant.fields.iter().enumerate() {
+                        let field_name = field.name.clone().unwrap_or_else(|| format!("f{}", i));
+                        self.emit_line(&format!("{} {};", self.c_type(&field.field_type), field_name));
+                    }
+                    self.indent -= 1;
+                    self.emit_line(&format!("}} {}_data;", variant.name));
+                }
+            }
+            self.indent -= 1;
+            self.emit_line("} data;");
+        }
+
+        self.indent -= 1;
+        self.emit_line("};");
+        self.emit_line("");
+
+        for (idx, variant) in enum_decl.variants.iter().enumerate() {
+            let variant_const = format!("{}_KIND_{}", enum_decl.name, variant.name);
+            self.emit_line(&format!("#define {} {}", variant_const, idx));
+        }
+        self.emit_line("");
+
+        for variant in &enum_decl.variants {
+            if variant.fields.is_empty() {
+                self.emit_line(&format!("{} {}_{}() {{", enum_decl.name, enum_decl.name, variant.name));
+                self.indent += 1;
+                self.emit_line(&format!("{} result;", enum_decl.name));
+                self.emit_line(&format!("result.kind = {}_KIND_{};", enum_decl.name, variant.name));
+                self.emit_line("return result;");
+                self.indent -= 1;
+                self.emit_line("}");
+            } else {
+                let params: Vec<String> = variant.fields.iter().enumerate().map(|(i, f)| {
+                    let field_name = f.name.clone().unwrap_or_else(|| format!("f{}", i));
+                    format!("{} {}", self.c_type(&f.field_type), field_name)
+                }).collect();
+                self.emit_line(&format!("{} {}_{}({}) {{", enum_decl.name, enum_decl.name, variant.name, params.join(", ")));
+                self.indent += 1;
+                self.emit_line(&format!("{} result;", enum_decl.name));
+                self.emit_line(&format!("result.kind = {}_KIND_{};", enum_decl.name, variant.name));
+                for (i, field) in variant.fields.iter().enumerate() {
+                    let field_name = field.name.clone().unwrap_or_else(|| format!("f{}", i));
+                    self.emit_line(&format!("result.data.{}_data.{} = {};", variant.name, field_name, field_name));
+                }
+                self.emit_line("return result;");
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+            self.emit_line("");
+        }
+    }
+
+    fn gen_match_expr(&mut self, subject: &Expr, arms: &[MatchArm]) -> String {
+        let match_id = self.match_counter;
+        self.match_counter += 1;
+
+        let subject_str = self.gen_expr(subject);
+
+        let result_var = format!("_match_result_{}", match_id);
+        let subject_var = format!("_match_subject_{}", match_id);
+
+        let enum_name = self.infer_enum_from_expr(subject);
+        if let Some(ref en) = enum_name {
+            let enum_decl = self.enums.get(en).cloned();
+            if let Some(ref enum_decl) = enum_decl {
+                self.emit_line(&format!("{} {} = {};", en, subject_var, subject_str));
+                self.emit_line(&format!("{} {};", en, result_var));
+
+                let variant_field_map: std::collections::HashMap<String, Vec<(String, String)>> = enum_decl.variants.iter().map(|v| {
+                    let fields: Vec<(String, String)> = v.fields.iter().enumerate().map(|(i, f)| {
+                        let field_name = f.name.clone().unwrap_or_else(|| format!("f{}", i));
+                        (field_name, self.c_type(&f.field_type))
+                    }).collect();
+                    (v.name.clone(), fields)
+                }).collect();
+
+                for (arm_idx, arm) in arms.iter().enumerate() {
+                    let keyword = if arm_idx == 0 { "if" } else { "else if" };
+
+                    match &arm.pattern {
+                        MatchPattern::Variant(variant_name, bindings) => {
+                            self.emit_line(&format!("{} ({}.kind == {}_KIND_{}) {{", keyword, subject_var, en, variant_name));
+                            self.indent += 1;
+                            for (i, binding) in bindings.iter().enumerate() {
+                                let field_name = variant_field_map.get(variant_name)
+                                    .and_then(|fields| fields.get(i))
+                                    .map(|(n, _)| n.clone())
+                                    .unwrap_or_else(|| format!("f{}", i));
+                                let binding_c_type = self.c_type(&binding.field_type);
+                                self.emit_line(&format!("{} {} = {}.data.{}_data.{};",
+                                    binding_c_type, binding.name, subject_var, variant_name, field_name));
+                            }
+                            match &arm.body {
+                                MatchBody::Expr(e) => {
+                                    let val = self.gen_expr(e);
+                                    self.emit_line(&format!("{} = {};", result_var, val));
+                                }
+                                MatchBody::Block(b) => {
+                                    for s in &b.statements {
+                                        self.generate_stmt(s);
+                                    }
+                                }
+                            }
+                            self.indent -= 1;
+                            self.emit_line("}");
+                        }
+                        MatchPattern::Wildcard => {
+                            self.emit_line("{");
+                            self.indent += 1;
+                            match &arm.body {
+                                MatchBody::Expr(e) => {
+                                    let val = self.gen_expr(e);
+                                    self.emit_line(&format!("{} = {};", result_var, val));
+                                }
+                                MatchBody::Block(b) => {
+                                    for s in &b.statements {
+                                        self.generate_stmt(s);
+                                    }
+                                }
+                            }
+                            self.indent -= 1;
+                            self.emit_line("}");
+                        }
+                        MatchPattern::Literal(expr) => {
+                            let lit_str = self.gen_expr(expr);
+                            self.emit_line(&format!("{} ({}.kind == {}) {{", keyword, subject_var, lit_str));
+                            self.indent += 1;
+                            match &arm.body {
+                                MatchBody::Expr(e) => {
+                                    let val = self.gen_expr(e);
+                                    self.emit_line(&format!("{} = {};", result_var, val));
+                                }
+                                MatchBody::Block(b) => {
+                                    for s in &b.statements {
+                                        self.generate_stmt(s);
+                                    }
+                                }
+                            }
+                            self.indent -= 1;
+                            self.emit_line("}");
+                        }
+                        MatchPattern::Or(patterns) => {
+                            let en_clone = en.clone();
+                            let sv_clone = subject_var.clone();
+                            let conditions: Vec<String> = patterns.iter().filter_map(|p| {
+                                match p {
+                                    MatchPattern::Variant(vn, _) => Some(format!("{}.kind == {}_KIND_{}", sv_clone, en_clone, vn)),
+                                    MatchPattern::Wildcard => Some("1".to_string()),
+                                    _ => None,
+                                }
+                            }).collect();
+                            self.emit_line(&format!("{} ({}) {{", keyword, conditions.join(" || ")));
+                            self.indent += 1;
+                            for p in patterns {
+                                if let MatchPattern::Variant(vn, bindings) = p {
+                                    if !bindings.is_empty() {
+                                        self.emit_line(&format!("if ({}.kind == {}_KIND_{}) {{", subject_var, en, vn));
+                                        self.indent += 1;
+                                        for (i, binding) in bindings.iter().enumerate() {
+                                            let field_name = variant_field_map.get(vn.as_str())
+                                                .and_then(|fields| fields.get(i))
+                                                .map(|(n, _)| n.clone())
+                                                .unwrap_or_else(|| format!("f{}", i));
+                                            let binding_c_type = self.c_type(&binding.field_type);
+                                            self.emit_line(&format!("{} {} = {}.data.{}_data.{};",
+                                                binding_c_type, binding.name, subject_var, vn, field_name));
+                                        }
+                                        self.indent -= 1;
+                                        self.emit_line("}");
+                                    }
+                                }
+                            }
+                            match &arm.body {
+                                MatchBody::Expr(e) => {
+                                    let val = self.gen_expr(e);
+                                    self.emit_line(&format!("{} = {};", result_var, val));
+                                }
+                                MatchBody::Block(b) => {
+                                    for s in &b.statements {
+                                        self.generate_stmt(s);
+                                    }
+                                }
+                            }
+                            self.indent -= 1;
+                            self.emit_line("}");
+                        }
+                    }
+                }
+
+                return result_var;
+            }
+        }
+
+        format!("/* unhandled match */ 0")
+    }
+
+    fn infer_enum_from_expr(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Variable(name) => {
+                if let Some(ty) = self.var_types.get(name) {
+                    let ty_clean = ty.trim_start_matches("const ");
+                    if self.enums.contains_key(ty_clean) {
+                        return Some(ty_clean.to_string());
+                    }
+                }
+                if self.enums.contains_key(name) {
+                    return Some(name.clone());
+                }
+                None
+            }
+            Expr::FieldAccess(obj, _field) => self.infer_enum_from_expr(obj),
+            Expr::MethodCall(obj, _, _) => self.infer_enum_from_expr(obj),
+            _ => None,
+        }
+    }
+
+    fn expr_is_string_type(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::StringLiteral(_) => true,
+            Expr::Variable(name) => {
+                if let Some(ty) = self.var_types.get(name) {
+                    ty.contains("char*") || ty.contains("const char*")
+                } else {
+                    false
+                }
+            }
+            Expr::BinaryOp(BinaryOp::Add, left, _) => {
+                self.expr_is_string_type(left)
+            }
+            Expr::MethodCall(obj, method, _) => {
+                let is_string_method = matches!(method.as_str(),
+                    "substring" | "toUpperCase" | "toLowerCase" | "trim" | "replace" | "concat" | "intToString"
+                );
+                if is_string_method {
+                    return true;
+                }
+                self.expr_is_string_type(obj)
+            }
+            Expr::FieldAccess(obj, _) => self.expr_is_string_type(obj),
+            Expr::Call(callee, _) => {
+                if let Expr::FieldAccess(obj, method) = callee.as_ref() {
+                    if method == "intToString" || method == "toString" {
+                        return true;
+                    }
+                    let _ = obj;
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn gen_string_concat(&mut self, left: &Expr, right: &Expr, left_is_string: bool, right_is_string: bool) -> String {
+        let l = self.gen_expr(left);
+        let r = self.gen_expr(right);
+
+        if left_is_string && right_is_string {
+            format!("String_concat({}, {})", l, r)
+        } else if left_is_string && !right_is_string {
+            format!("String_concat({}, String_intToString((int32_t){}))", l, r)
+        } else if !left_is_string && right_is_string {
+            format!("String_concat(String_intToString((int32_t){}), {})", l, r)
+        } else {
+            format!("String_concat({}, {})", l, r)
+        }
     }
 }

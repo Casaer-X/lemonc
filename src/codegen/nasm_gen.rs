@@ -72,6 +72,9 @@ impl NasmCodeGen {
             match decl {
                 Declaration::Class(class) => self.generate_class(class),
                 Declaration::Function(func) => self.generate_function(func),
+                Declaration::Enum(_) => {
+                    self.emit_line("    ; enum declaration - not supported in NASM gen");
+                }
                 _ => {}
             }
         }
@@ -212,6 +215,7 @@ impl NasmCodeGen {
             Expr::Variable(name) => self.resolve_class_for_var(name),
             Expr::New(class_name, _, _) => Some(class_name.clone()),
             Expr::FieldAccess(obj, _) => self.infer_class_from_expr(obj),
+            Expr::Match(_, _) => None,
             _ => None,
         }
     }
@@ -573,6 +577,12 @@ impl NasmCodeGen {
             }
             Stmt::Try(_try_block, _catches, _finally) => {
                 self.emit_line("    ; try/catch - not fully supported in NASM gen");
+            }
+            Stmt::Switch(..) => {
+                self.emit_line("    ; switch - not supported in NASM gen");
+            }
+            Stmt::ForEach(..) => {
+                self.emit_line("    ; foreach - not supported in NASM gen");
             }
         }
     }
@@ -969,6 +979,10 @@ impl NasmCodeGen {
             Expr::Throw(inner) => {
                 self.gen_expr_to_rax(inner);
                 self.emit_line("    ; throw - not fully supported in NASM gen");
+            }
+            Expr::Match(_, _) => {
+                self.emit_line("    ; match expression - not supported in NASM gen");
+                self.emit_line("    xor rax, rax");
             }
         }
     }

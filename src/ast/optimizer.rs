@@ -34,7 +34,11 @@ impl AstOptimizer {
             match decl {
                 Declaration::Class(class) => self.optimize_class(class),
                 Declaration::Function(func) => self.optimize_function(func),
-                _ => {}
+                Declaration::Enum(_) => {}
+                Declaration::Interface(_) => {}
+                Declaration::Variable(_) => {}
+                Declaration::Import(_) => {}
+                Declaration::Package(_) => {}
             }
         }
         &self.stats
@@ -158,6 +162,22 @@ impl AstOptimizer {
                 }
             }
             Stmt::Break | Stmt::Continue => {}
+            Stmt::Switch(expr, cases, default) => {
+                self.optimize_expr(expr);
+                for case in cases {
+                    for pattern in &mut case.patterns {
+                        self.optimize_expr(pattern);
+                    }
+                    self.optimize_block(&mut case.body);
+                }
+                if let Some(default_block) = default {
+                    self.optimize_block(default_block);
+                }
+            }
+            Stmt::ForEach(_type_ref, _name, iterable, body) => {
+                self.optimize_expr(iterable);
+                self.optimize_stmt(body);
+            }
         }
     }
 
@@ -255,7 +275,28 @@ impl AstOptimizer {
                     }
                 }
             }
-            _ => {}
+            Expr::IntegerLiteral(_)
+            | Expr::FloatLiteral(_)
+            | Expr::StringLiteral(_)
+            | Expr::CharLiteral(_)
+            | Expr::BoolLiteral(_)
+            | Expr::Null
+            | Expr::This
+            | Expr::Super
+            | Expr::Sizeof(_)
+            | Expr::Match(_, _) => {}
+            Expr::TypeId(e) => {
+                self.optimize_expr(e);
+            }
+            Expr::Lambda(_, body) => {
+                match body.as_mut() {
+                    LambdaBody::Expr(e) => self.optimize_expr(e),
+                    LambdaBody::Block(b) => self.optimize_block(b),
+                }
+            }
+            Expr::Throw(e) => {
+                self.optimize_expr(e);
+            }
         }
     }
 
@@ -370,7 +411,16 @@ impl AstOptimizer {
         match stmt {
             Stmt::Expr(expr) => self.is_pure_expr(expr),
             Stmt::Block(block) => block.statements.is_empty(),
-            _ => false,
+            Stmt::VarDecl(_)
+            | Stmt::Return(_)
+            | Stmt::If(_, _, _)
+            | Stmt::While(_, _)
+            | Stmt::For(_, _, _, _)
+            | Stmt::ForEach(_, _, _, _)
+            | Stmt::Try(_, _, _)
+            | Stmt::Switch(_, _, _)
+            | Stmt::Break
+            | Stmt::Continue => false,
         }
     }
 
@@ -388,7 +438,20 @@ impl AstOptimizer {
             Expr::BinaryOp(_, l, r) => self.is_pure_expr(l) && self.is_pure_expr(r),
             Expr::UnaryOp(_, o) => self.is_pure_expr(o),
             Expr::Ternary(c, t, e) => self.is_pure_expr(c) && self.is_pure_expr(t) && self.is_pure_expr(e),
-            _ => false,
+            Expr::Assignment(_, _)
+            | Expr::Call(_, _)
+            | Expr::MethodCall(_, _, _)
+            | Expr::FieldAccess(_, _)
+            | Expr::ArrayAccess(_, _)
+            | Expr::New(_, _, _)
+            | Expr::Delete(_)
+            | Expr::Cast(_, _)
+            | Expr::InstanceOf(_, _)
+            | Expr::Sizeof(_)
+            | Expr::TypeId(_)
+            | Expr::Lambda(_, _)
+            | Expr::Throw(_)
+            | Expr::Match(_, _) => false,
         }
     }
 }

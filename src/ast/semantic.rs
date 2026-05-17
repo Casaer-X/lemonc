@@ -65,6 +65,17 @@ pub enum SemanticError {
         method_name: String,
         class_name: String,
     },
+    UndefinedEnum {
+        name: String,
+    },
+    UndefinedVariant {
+        enum_name: String,
+        variant_name: String,
+    },
+    NonExhaustiveMatch {
+        enum_name: String,
+        missing_variants: Vec<String>,
+    },
 }
 
 impl std::fmt::Display for SemanticError {
@@ -108,6 +119,15 @@ impl std::fmt::Display for SemanticError {
             SemanticError::BareMethodCall { method_name, class_name } => {
                 write!(f, "Method '{}' must be called as 'this.{}()' or '{}.{}()'", method_name, method_name, class_name, method_name)
             }
+            SemanticError::UndefinedEnum { name } => {
+                write!(f, "Undefined enum '{}'", name)
+            }
+            SemanticError::UndefinedVariant { enum_name, variant_name } => {
+                write!(f, "Undefined variant '{}' in enum '{}'", variant_name, enum_name)
+            }
+            SemanticError::NonExhaustiveMatch { enum_name, missing_variants } => {
+                write!(f, "Non-exhaustive match on enum '{}', missing variants: {}", enum_name, missing_variants.join(", "))
+            }
         }
     }
 }
@@ -121,9 +141,15 @@ struct ClassInfo {
     is_abstract: bool,
 }
 
+struct EnumInfo {
+    name: String,
+    variants: Vec<EnumVariant>,
+}
+
 pub struct SemanticAnalyzer {
     classes: HashMap<String, ClassInfo>,
     interfaces: HashMap<String, InterfaceDecl>,
+    enums: HashMap<String, EnumInfo>,
     functions: HashMap<String, FunctionDecl>,
     errors: Vec<SemanticError>,
     current_class: Option<String>,
@@ -136,6 +162,7 @@ impl SemanticAnalyzer {
         Self {
             classes: HashMap::new(),
             interfaces: HashMap::new(),
+            enums: HashMap::new(),
             functions: HashMap::new(),
             errors: Vec::new(),
             current_class: None,
@@ -232,6 +259,18 @@ impl SemanticAnalyzer {
                         });
                     } else {
                         self.interfaces.insert(iface.name.clone(), iface.clone());
+                    }
+                }
+                Declaration::Enum(enum_decl) => {
+                    if self.enums.contains_key(&enum_decl.name) {
+                        self.errors.push(SemanticError::DuplicateDefinition {
+                            name: enum_decl.name.clone(),
+                        });
+                    } else {
+                        self.enums.insert(enum_decl.name.clone(), EnumInfo {
+                            name: enum_decl.name.clone(),
+                            variants: enum_decl.variants.clone(),
+                        });
                     }
                 }
                 Declaration::Function(func) => {
@@ -625,6 +664,23 @@ impl SemanticAnalyzer {
                 }
             }
             Stmt::Break | Stmt::Continue => {}
+            Stmt::Switch(subject, cases, default_body) => {
+                self.check_expr(subject);
+                for case in cases {
+                    for pattern in &case.patterns {
+                        self.check_expr(pattern);
+                    }
+                    self.check_block(&case.body);
+                }
+                if let Some(default_block) = default_body {
+                    self.check_block(default_block);
+                }
+            }
+            Stmt::ForEach(elem_type, _name, iterable, body) => {
+                self.check_type_ref(elem_type);
+                self.check_expr(iterable);
+                self.check_stmt(body);
+            }
         }
     }
 
@@ -676,7 +732,6 @@ impl SemanticAnalyzer {
                                 method_name: name.clone(),
                                 class_name: current_class.clone(),
                             });
-                            return;
                         }
                     }
                 }
@@ -809,6 +864,16 @@ impl SemanticAnalyzer {
             Expr::Throw(expr) => {
                 self.check_expr(expr);
             }
+            Expr::Match(subject, arms) => {
+                self.check_expr(subject);
+                for arm in arms {
+                    self.check_match_pattern(&arm.pattern);
+                    match &arm.body {
+                        MatchBody::Expr(e) => self.check_expr(e),
+                        MatchBody::Block(b) => self.check_block(b),
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -903,7 +968,7 @@ impl SemanticAnalyzer {
             name,
             "int" | "long" | "float" | "double" | "bool" | "void" | "byte" | "char" | "short" | "String" | "TypeInfo" | "Array" | "Map"
             | "List" | "Pair" | "Optional" | "Result" | "Set" | "Queue" | "Stack" | "HashMap" | "HashSet" | "LinkedList" | "Tuple"
-        )
+        ) || self.enums.contains_key(name)
     }
 
     fn is_builtin_func(&self, name: &str) -> bool {
@@ -946,6 +1011,34 @@ impl SemanticAnalyzer {
                 "size" | "add" | "remove" | "contains" | "clear" | "isEmpty"
             ),
             _ => false,
+        }
+    }
+
+    fn check_match_pattern(&mut self, pattern: &MatchPattern) {
+        match pattern {
+            MatchPattern::Variant(name, bindings) => {
+                let found = self.enums.values().any(|e| {
+                    e.variants.iter().any(|v| v.name == *name)
+                });
+                if !found {
+                    self.errors.push(SemanticError::UndefinedVariant {
+                        enum_name: String::new(),
+                        variant_name: name.clone(),
+                    });
+                }
+                for binding in bindings {
+                    self.check_type_ref(&binding.field_type);
+                }
+            }
+            MatchPattern::Wildcard => {}
+            MatchPattern::Literal(expr) => {
+                self.check_expr(expr);
+            }
+            MatchPattern::Or(patterns) => {
+                for p in patterns {
+                    self.check_match_pattern(p);
+                }
+            }
         }
     }
 }

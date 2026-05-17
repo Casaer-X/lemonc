@@ -69,8 +69,6 @@ fn main() {
         .find(|a| !a.starts_with('-'))
         .expect("No input file specified");
 
-    let output_file = get_output_file(&args, input, &target);
-
     let source = match fs::read_to_string(input) {
         Ok(s) => s,
         Err(e) => {
@@ -94,6 +92,7 @@ fn main() {
     } else {
         target
     };
+    let output_file = get_output_file(&args, input, &effective_target, annotation_config.output_name.as_deref());
 
     println!("[1/5] Lexical analysis...");
     let lexer = Lexer::new(&source);
@@ -147,7 +146,7 @@ fn main() {
     println!("  IR generated successfully");
 
     println!("\n[4/5] Optimizing...");
-    let opt_level = get_opt_level(&args);
+    let opt_level = get_opt_level(&args, annotation_config.optimize_level);
     if opt_level > 0 {
         let mut optimizer = ast::optimizer::AstOptimizer::new();
         let stats = optimizer.optimize(&mut program);
@@ -634,11 +633,15 @@ fn get_target(args: &[String]) -> String {
     "c".to_string()
 }
 
-fn get_output_file(args: &[String], input: &str, target: &str) -> String {
+fn get_output_file(args: &[String], input: &str, target: &str, annotation_output: Option<&str>) -> String {
     if let Some(pos) = args.iter().position(|a| a == "-o") {
         if let Some(output) = args.get(pos + 1) {
             return output.clone();
         }
+    }
+
+    if let Some(output) = annotation_output {
+        return output.to_string();
     }
 
     let base = input.trim_end_matches(".lm");
@@ -652,11 +655,12 @@ fn get_output_file(args: &[String], input: &str, target: &str) -> String {
             format!("{}{}", base, os.exe_ext)
         }
         "nasm" => format!("{}.asm", base),
+        "bytecode" | "jit" => format!("{}.lmb", base),
         _ => format!("{}.c", base),
     }
 }
 
-fn get_opt_level(args: &[String]) -> u32 {
+fn get_opt_level(args: &[String], annotation_level: u32) -> u32 {
     for arg in args {
         if arg.starts_with("-O") {
             let level_str = &arg[2..];
@@ -668,7 +672,7 @@ fn get_opt_level(args: &[String]) -> u32 {
             }
         }
     }
-    1
+    annotation_level.min(3)
 }
 
 fn print_usage() {

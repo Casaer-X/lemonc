@@ -119,6 +119,7 @@ impl BytecodeGen {
                     }
                     self.current_class = None;
                 }
+                Declaration::Enum(_) => {}
                 _ => {}
             }
         }
@@ -330,6 +331,51 @@ impl BytecodeGen {
                 let end_pos = func.code.len();
                 self.label_map.insert(end_label.clone(), end_pos);
             }
+            Stmt::Break => {
+                func.code.push(BytecodeOp::Jmp(0));
+            }
+            Stmt::Continue => {
+                func.code.push(BytecodeOp::Jmp(0));
+            }
+            Stmt::Try(body, catch_blocks, finally_block) => {
+                for s in &body.statements {
+                    self.gen_stmt(func, s);
+                }
+                for cb in catch_blocks {
+                    for s in &cb.body.statements {
+                        self.gen_stmt(func, s);
+                    }
+                }
+                if let Some(fb) = finally_block {
+                    for s in &fb.statements {
+                        self.gen_stmt(func, s);
+                    }
+                }
+            }
+            Stmt::Switch(subject, cases, default_body) => {
+                self.gen_expr(func, subject);
+                for case in cases {
+                    for pattern in &case.patterns {
+                        self.gen_expr(func, pattern);
+                    }
+                    for s in &case.body.statements {
+                        self.gen_stmt(func, s);
+                    }
+                }
+                if let Some(default) = default_body {
+                    for s in &default.statements {
+                        self.gen_stmt(func, s);
+                    }
+                }
+                let idx = self.program.add_constant(Constant::Int(0));
+                func.code.push(BytecodeOp::PushConst(idx));
+            }
+            Stmt::ForEach(_elem_type, _name, iterable, body) => {
+                self.gen_expr(func, iterable);
+                self.gen_stmt(func, body);
+                let idx = self.program.add_constant(Constant::Int(0));
+                func.code.push(BytecodeOp::PushConst(idx));
+            }
             _ => {}
         }
     }
@@ -526,6 +572,25 @@ impl BytecodeGen {
 
                 let end_pos = func.code.len();
                 self.label_map.insert(end_label.clone(), end_pos);
+            }
+            Expr::CharLiteral(c) => {
+                let idx = self.program.add_constant(Constant::Int(*c as i64));
+                func.code.push(BytecodeOp::PushConst(idx));
+            }
+            Expr::Match(subject, arms) => {
+                self.gen_expr(func, subject);
+                for arm in arms {
+                    match &arm.body {
+                        MatchBody::Expr(e) => self.gen_expr(func, e),
+                        MatchBody::Block(b) => {
+                            for s in &b.statements {
+                                self.gen_stmt(func, s);
+                            }
+                        }
+                    }
+                }
+                let idx = self.program.add_constant(Constant::Int(0));
+                func.code.push(BytecodeOp::PushConst(idx));
             }
             _ => {}
         }

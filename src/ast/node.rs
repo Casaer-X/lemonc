@@ -9,6 +9,7 @@ pub struct Program {
 pub enum Declaration {
     Class(ClassDecl),
     Interface(InterfaceDecl),
+    Enum(EnumDecl),
     Function(FunctionDecl),
     Variable(VarDecl),
     Import(ImportDecl),
@@ -170,6 +171,26 @@ pub struct PackageDecl {
 }
 
 #[derive(Debug, Clone)]
+pub struct EnumDecl {
+    pub name: String,
+    pub type_params: Vec<TypeParam>,
+    pub variants: Vec<EnumVariant>,
+    pub modifiers: Vec<ClassModifier>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumVariant {
+    pub name: String,
+    pub fields: Vec<EnumVariantField>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumVariantField {
+    pub field_type: TypeRef,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Block {
     pub statements: Vec<Stmt>,
 }
@@ -180,12 +201,20 @@ pub enum Stmt {
     Expr(Expr),
     If(Expr, Box<Stmt>, Option<Box<Stmt>>),
     For(Option<Box<Stmt>>, Option<Expr>, Option<Expr>, Box<Stmt>),
+    ForEach(TypeRef, String, Expr, Box<Stmt>),
     While(Expr, Box<Stmt>),
     Return(Option<Expr>),
     Break,
     Continue,
     Try(Block, Vec<CatchClause>, Option<Block>),
     VarDecl(VarDecl),
+    Switch(Expr, Vec<SwitchCase>, Option<Block>),
+}
+
+#[derive(Debug, Clone)]
+pub struct SwitchCase {
+    pub patterns: Vec<Expr>,
+    pub body: Block,
 }
 
 #[derive(Debug, Clone)]
@@ -222,6 +251,33 @@ pub enum Expr {
     Lambda(Vec<Param>, Box<LambdaBody>),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
     Throw(Box<Expr>),
+    Match(Box<Expr>, Vec<MatchArm>),
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchArm {
+    pub pattern: MatchPattern,
+    pub body: MatchBody,
+}
+
+#[derive(Debug, Clone)]
+pub enum MatchPattern {
+    Variant(String, Vec<MatchBinding>),
+    Wildcard,
+    Literal(Expr),
+    Or(Vec<MatchPattern>),
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchBinding {
+    pub field_type: TypeRef,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum MatchBody {
+    Expr(Expr),
+    Block(Block),
 }
 
 #[derive(Debug, Clone)]

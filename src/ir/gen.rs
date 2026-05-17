@@ -33,7 +33,9 @@ impl IRGenerator {
                 Declaration::Class(class) => self.generate_class(class),
                 Declaration::Function(func) => self.generate_function(func),
                 Declaration::Interface(iface) => self.generate_interface(iface),
-                _ => {}
+                Declaration::Enum(_) => {}
+                Declaration::Import(_) => {}
+                Declaration::Variable(_) => {}
             }
         }
         &self.module
@@ -361,6 +363,12 @@ impl IRGenerator {
             Stmt::Try(_try_block, _catches, _finally) => {
                 self.emit(func, IRInstruction::Debug("try-catch not fully supported".to_string()));
             }
+            Stmt::Switch(_expr, _cases, _default) => {
+                self.emit(func, IRInstruction::Debug("switch not yet implemented".to_string()));
+            }
+            Stmt::ForEach(_type_ref, _name, _iterable, _body) => {
+                self.emit(func, IRInstruction::Debug("for-each not yet implemented".to_string()));
+            }
         }
     }
 
@@ -563,6 +571,10 @@ impl IRGenerator {
                 let _val = self.generate_expr(func, expr);
                 self.emit(func, IRInstruction::Debug("throw".to_string()));
                 self.new_value(IRType::Void, "throw")
+            }
+            Expr::Match(_scrutinee, _arms) => {
+                self.emit(func, IRInstruction::Debug("match not yet implemented".to_string()));
+                self.new_value(IRType::i32(), "match")
             }
         }
     }

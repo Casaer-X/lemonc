@@ -6,54 +6,63 @@ package time;
 public class Time {
     public static final int CLOCKS_PER_SEC = 1000;
 
-    public static int clockTicks() {
+    public static int ticks() {
         return clock();
+    }
+
+    public static int nowSeconds() {
+        return time(0);
     }
 
     public static double elapsedSeconds(int startTicks) {
         int current = clock();
-        int diff = current - startTicks;
-        return (double)diff / Time.CLOCKS_PER_SEC;
+        return (double)(current - startTicks) / 1000.0;
+    }
+
+    public static int elapsedMillis(int startTicks) {
+        return clock() - startTicks;
     }
 }
 
 public class Timer {
     private int startTicks;
-    private bool isRunning;
+    private int stopTicks;
+    private bool running;
 
     public Timer() {
         this.startTicks = 0;
-        this.isRunning = false;
+        this.stopTicks = 0;
+        this.running = false;
     }
 
     public void start() {
         this.startTicks = clock();
-        this.isRunning = true;
+        this.stopTicks = this.startTicks;
+        this.running = true;
     }
 
     public void stop() {
-        this.isRunning = false;
+        this.stopTicks = clock();
+        this.running = false;
     }
 
     public void reset() {
         this.startTicks = clock();
-    }
-
-    public double elapsedSeconds() {
-        if (!this.isRunning) return 0.0;
-        int current = clock();
-        int diff = current - this.startTicks;
-        return (double)diff / Time.CLOCKS_PER_SEC;
-    }
-
-    public int elapsedMillis() {
-        if (!this.isRunning) return 0;
-        int current = clock();
-        int diff = current - this.startTicks;
-        return diff;
+        this.stopTicks = this.startTicks;
     }
 
     public bool isRunning() {
-        return this.isRunning;
+        return this.running;
+    }
+
+    public int elapsedMillis() {
+        if (this.running) {
+            return clock() - this.startTicks;
+        }
+        return this.stopTicks - this.startTicks;
+    }
+
+    public double elapsedSeconds() {
+        return (double)this.elapsedMillis() / 1000.0;
     }
 }

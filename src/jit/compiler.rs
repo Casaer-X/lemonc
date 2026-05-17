@@ -49,6 +49,9 @@ impl BytecodeCompiler {
                     let idx = self.module.functions.len() as u32;
                     self.func_map.insert(f.name.clone(), idx);
                 }
+                Declaration::Enum(_) => {
+                    // TODO: Enum support
+                }
                 _ => {}
             }
         }
@@ -352,6 +355,12 @@ impl BytecodeCompiler {
                     func.code.push(Bytecode::Jump(label));
                 }
             }
+            Stmt::ForEach(_, _, _, _) => {
+                // TODO: ForEach support
+            }
+            Stmt::Switch(_, _, _) => {
+                // TODO: Switch support
+            }
             Stmt::Try(_, _, _) => {
                 // TODO: Exception handling
             }
@@ -600,6 +609,10 @@ impl BytecodeCompiler {
                 self.compile_expr(func, e);
                 // TODO: Exception handling
             }
+            Expr::Match(_, _) => {
+                // TODO: Match expression support
+                func.code.push(Bytecode::PushNull);
+            }
         }
     }
 
@@ -621,6 +634,7 @@ impl BytecodeCompiler {
             }
             Expr::New(cn, _, _) => Some(cn.clone()),
             Expr::FieldAccess(obj, _) => self.infer_class(obj),
+            Expr::Match(_, _) => None,
             _ => None,
         }
     }

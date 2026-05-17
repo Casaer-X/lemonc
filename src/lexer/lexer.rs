@@ -160,6 +160,9 @@ impl<'a> Lexer<'a> {
                 if self.peek_char() == Some('=') {
                     self.advance();
                     self.make_token(TokenKind::Eq, start_pos, self.pos)
+                } else if self.peek_char() == Some('>') {
+                    self.advance();
+                    self.make_token(TokenKind::FatArrow, start_pos, self.pos)
                 } else {
                     self.make_token(TokenKind::Assign, start_pos, self.pos)
                 }
@@ -401,6 +404,12 @@ impl<'a> Lexer<'a> {
             "instanceof" => TokenKind::InstanceOf,
             "as" => TokenKind::As,
             "finally" => TokenKind::Finally,
+            "enum" => TokenKind::Enum,
+            "match" => TokenKind::Match,
+            "switch" => TokenKind::Switch,
+            "case" => TokenKind::Case,
+            "default" => TokenKind::Default,
+            "in" => TokenKind::In,
             "void" => TokenKind::Void,
             "bool" => TokenKind::Bool,
             "byte" => TokenKind::Byte,

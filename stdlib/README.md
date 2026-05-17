@@ -1,68 +1,48 @@
 # Lemon Standard Library
 
-Lemon 语言标准库，提供常用的工具类和函数。
+这是 Lemon 语言的标准库草案，所有公开 API 都用 Lemon 源码编写。当前库尽量使用编译器已经支持的语法和内置运行时函数，适合作为语言自举标准库的起点。
 
-## 模块列表
+## 模块
 
-| 模块 | 包名 | 说明 |
-|------|------|------|
-| [Math](math.lm) | `math` | 数学函数和常量 |
-| [IO](io.lm) | `io` | 输入输出操作 |
-| [String](string.lm) | `string` | 字符串工具 |
-| [Random](random.lm) | `random` | 随机数生成 |
-| [Time](time.lm) | `time` | 时间和日期工具 |
-| [System](system.lm) | `system` | 系统级工具 |
-| [Algorithm](algorithm.lm) | `algorithm` | 常用算法 |
+| 模块 | 包名 | 主要内容 |
+| --- | --- | --- |
+| `math.lm` | `math` | 数学常量、数值工具、整数算法、近似计算 |
+| `io.lm` | `io` | 控制台输出、基础输入、格式化辅助 |
+| `string.lm` | `string` | 字符串判断、查找、转换、填充、字符分类 |
+| `random.lm` | `random` | 可设置种子的 LCG 随机数与 `rand` 封装 |
+| `time.lm` | `time` | 时钟 ticks、秒/毫秒计时、Timer |
+| `system.lm` | `system` | 进程退出、环境变量、系统命令、断言 |
+| `algorithm.lm` | `algorithm` | 排序、查找、数组聚合与复制 |
 
-## 使用方法
+## 示例
 
 ```lemon
 package main;
 
 import math.Math;
 import io.Console;
-import random.RandomUtils;
+import io.Format;
+import random.Random;
+import string.StringUtils;
 
-public class MyApp {
+public class App {
     public static void main(String[] args) {
-        // 数学运算
-        double r = Math.sqrtApprox(16.0);
-        double angle = Math.toRadians(90.0);
+        double root = Math.sqrtApprox(16.0);
+        Format.printLabelDouble("sqrt = ", root);
 
-        // 控制台输出
-        Console.println("Hello, Lemon!");
-        Console.printInt(42);
+        Random rng = new Random(1234);
+        int value = rng.nextIntBetween(1, 7);
+        Format.printLabelInt("dice = ", value);
 
-        // 随机数
-        int dice = RandomUtils.randomInt(1, 7);
-        Console.printInt(dice);
+        bool ok = StringUtils.startsWith("lemon", "lem");
+        Console.printlnBool(ok);
     }
 }
 ```
 
-## 编译标准库
+## 说明
 
-```bash
-# 编译整个标准库为库文件
-cd stdlib
-lemonc --build
-
-# 编译单个模块
-lemonc math.lm --target library
-```
-
-## 依赖关系
-
-- `math` - 无依赖
-- `io` - 无依赖
-- `string` - 无依赖
-- `random` - 无依赖
-- `time` - 无依赖
-- `system` - 无依赖
-- `algorithm` - 无依赖
-
-## 注意事项
-
-1. 所有模块使用 `// @compile target=library` 注解标记为库
-2. 包名使用简单标识符（如 `math`），通过目录结构组织
-3. 部分功能为纯 Lemon 实现，不依赖 C 标准库
+- 每个模块都带有 `// @compile target=library` 注解，可由项目构建模式识别为库目标。
+- 目前 Lemon 前端对构造器的代码生成兼容 Java 风格写法，例如 `public Random(...)`；标准库因此采用这一形式。
+- `Array<int>` 相关工具依赖当前运行时内置的 `Array`/`LemonArray` 桥接。
+- 部分系统能力通过编译器已有的内置 C 运行时函数暴露，例如 `printf`、`scanf`、`clock`、`rand`、`getenv`。

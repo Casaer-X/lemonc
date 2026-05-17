@@ -9,6 +9,7 @@ pub enum TokenKind {
     Try, Catch, Throw, Import, Package, Extern,
     Sizeof, TypeId, This, Super, InstanceOf,
     At, As, Finally,
+    Enum, Match, Switch, Case, Default, In,
 
     Void, Bool, Byte, Char, Short, Int, Long, Float, Double,
 
@@ -28,7 +29,7 @@ pub enum TokenKind {
     Shl, Shr,
     ShlAssign, ShrAssign,
     Inc, Dec,
-    Arrow,
+    Arrow, FatArrow,
 
     LeftParen, RightParen,
     LeftBrace, RightBrace,
@@ -100,6 +101,12 @@ impl fmt::Display for TokenKind {
             TokenKind::At => write!(f, "@"),
             TokenKind::As => write!(f, "as"),
             TokenKind::Finally => write!(f, "finally"),
+            TokenKind::Enum => write!(f, "enum"),
+            TokenKind::Match => write!(f, "match"),
+            TokenKind::Switch => write!(f, "switch"),
+            TokenKind::Case => write!(f, "case"),
+            TokenKind::Default => write!(f, "default"),
+            TokenKind::In => write!(f, "in"),
             TokenKind::Void => write!(f, "void"),
             TokenKind::Bool => write!(f, "bool"),
             TokenKind::Byte => write!(f, "byte"),
@@ -148,6 +155,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Inc => write!(f, "++"),
             TokenKind::Dec => write!(f, "--"),
             TokenKind::Arrow => write!(f, "->"),
+            TokenKind::FatArrow => write!(f, "=>"),
             TokenKind::LeftParen => write!(f, "("),
             TokenKind::RightParen => write!(f, ")"),
             TokenKind::LeftBrace => write!(f, "{{"),

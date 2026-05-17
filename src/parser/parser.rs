@@ -224,6 +224,10 @@ impl Parser {
                     let interface = self.parse_interface_decl();
                     return Some(Declaration::Interface(interface));
                 }
+                TokenKind::Enum => {
+                    let enum_decl = self.parse_enum_decl();
+                    return Some(Declaration::Enum(enum_decl));
+                }
                 _ => {}
             }
         }
@@ -794,8 +798,9 @@ impl Parser {
         let stmt = match self.peek_kind().unwrap() {
             TokenKind::LeftBrace => Stmt::Block(self.parse_block()),
             TokenKind::If => self.parse_if_stmt(),
-            TokenKind::For => self.parse_for_stmt(),
+            TokenKind::For => self.parse_for_or_foreach_stmt(),
             TokenKind::While => self.parse_while_stmt(),
+            TokenKind::Switch => self.parse_switch_stmt(),
             TokenKind::Return => {
                 self.advance();
                 let expr = if self.peek_kind() != Some(TokenKind::Semicolon) {
@@ -889,47 +894,6 @@ impl Parser {
         };
 
         Stmt::If(condition, then_branch, else_branch)
-    }
-
-    fn parse_for_stmt(&mut self) -> Stmt {
-        self.advance();
-        self.expect(TokenKind::LeftParen).ok();
-
-        let init = if self.peek_kind() != Some(TokenKind::Semicolon) {
-            let is_decl = matches!(
-                self.peek_kind(),
-                Some(TokenKind::Int | TokenKind::Long | TokenKind::Float | 
-                     TokenKind::Double | TokenKind::Bool | 
-                     TokenKind::Byte | TokenKind::Char | TokenKind::Short | 
-                     TokenKind::Void)
-            );
-            if is_decl {
-                Some(self.parse_var_decl_for_init())
-            } else {
-                Some(Stmt::Expr(self.parse_expression()))
-            }
-        } else {
-            None
-        };
-        self.expect(TokenKind::Semicolon).ok();
-
-        let condition = if self.peek_kind() != Some(TokenKind::Semicolon) {
-            Some(self.parse_expression())
-        } else {
-            None
-        };
-        self.expect(TokenKind::Semicolon).ok();
-
-        let update = if self.peek_kind() != Some(TokenKind::RightParen) {
-            Some(self.parse_expression())
-        } else {
-            None
-        };
-        self.expect(TokenKind::RightParen).ok();
-
-        let body = Box::new(self.parse_statement().unwrap());
-
-        Stmt::For(init.map(Box::new), condition, update, body)
     }
 
     fn parse_while_stmt(&mut self) -> Stmt {
@@ -1293,6 +1257,7 @@ impl Parser {
             TokenKind::Delete => self.parse_delete_expression(),
             TokenKind::Sizeof => self.parse_sizeof_expression(),
             TokenKind::TypeId => self.parse_typeid_expression(),
+            TokenKind::Match => self.parse_match_expression(),
             TokenKind::LeftParen => {
                 self.advance();
                 if self.is_type_start() {
@@ -1403,5 +1368,339 @@ impl Parser {
             }
         }
         args
+    }
+
+    fn parse_enum_decl(&mut self) -> EnumDecl {
+        let modifiers = self.parse_class_modifiers();
+        self.expect(TokenKind::Enum).unwrap();
+
+        let name_token = self.expect_identifier().unwrap();
+        let name = match name_token.kind {
+            TokenKind::Identifier(s) => s,
+            _ => String::new(),
+        };
+
+        let type_params = if self.peek_kind() == Some(TokenKind::Lt) {
+            self.parse_type_params()
+        } else {
+            Vec::new()
+        };
+
+        self.expect(TokenKind::LeftBrace).ok();
+        let mut variants = Vec::new();
+        while !self.check_keyword(TokenKind::RightBrace) && !self.is_at_end() {
+            if let Some(variant) = self.parse_enum_variant() {
+                variants.push(variant);
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+            } else {
+                self.advance();
+            }
+        }
+        self.expect(TokenKind::RightBrace).ok();
+
+        EnumDecl {
+            name,
+            type_params,
+            variants,
+            modifiers,
+        }
+    }
+
+    fn parse_enum_variant(&mut self) -> Option<EnumVariant> {
+        let name_token = self.expect_identifier().ok()?;
+        let name = match name_token.kind {
+            TokenKind::Identifier(s) => s,
+            _ => String::new(),
+        };
+
+        let fields = if self.peek_kind() == Some(TokenKind::LeftParen) {
+            self.advance();
+            self.parse_enum_variant_fields()
+        } else {
+            Vec::new()
+        };
+
+        Some(EnumVariant { name, fields })
+    }
+
+    fn parse_enum_variant_fields(&mut self) -> Vec<EnumVariantField> {
+        let mut fields = Vec::new();
+        while !self.check_keyword(TokenKind::RightParen) && !self.is_at_end() {
+            let field_type = self.parse_type_ref();
+            let name = if matches!(self.peek_kind(), Some(TokenKind::Identifier(_)))
+                && !self.is_next_token_colon_or_comma_or_paren()
+            {
+                let name_token = self.expect_identifier().ok();
+                name_token.and_then(|t| match t.kind {
+                    TokenKind::Identifier(s) => Some(s),
+                    _ => None,
+                })
+            } else {
+                None
+            };
+            fields.push(EnumVariantField { field_type, name });
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::RightParen).ok();
+        fields
+    }
+
+    fn is_next_token_colon_or_comma_or_paren(&self) -> bool {
+        matches!(
+            self.peek_kind(),
+            Some(TokenKind::Colon | TokenKind::Comma | TokenKind::RightParen)
+        )
+    }
+
+    fn parse_for_or_foreach_stmt(&mut self) -> Stmt {
+        self.advance();
+        self.expect(TokenKind::LeftParen).ok();
+
+        let is_foreach = self.is_foreach_pattern();
+        if is_foreach {
+            self.parse_for_each_stmt()
+        } else {
+            self.parse_for_stmt_body()
+        }
+    }
+
+    fn is_foreach_pattern(&self) -> bool {
+        let saved_pos = self.pos;
+        let mut lookahead = saved_pos;
+
+        if lookahead >= self.tokens.len() {
+            return false;
+        }
+
+        if matches!(self.tokens[lookahead].kind, TokenKind::Identifier(_)) {
+            lookahead += 1;
+            if lookahead < self.tokens.len() {
+                if matches!(self.tokens[lookahead].kind, TokenKind::In) {
+                    return true;
+                }
+            }
+        }
+
+        if self.is_type_token() {
+            let mut scan_pos = self.pos;
+            while scan_pos < self.tokens.len() {
+                match &self.tokens[scan_pos].kind {
+                    TokenKind::Identifier(_) => {
+                        scan_pos += 1;
+                        if scan_pos < self.tokens.len() {
+                            if matches!(self.tokens[scan_pos].kind, TokenKind::In) {
+                                return true;
+                            }
+                        }
+                        break;
+                    }
+                    TokenKind::Lt | TokenKind::LeftBracket | TokenKind::Star => {
+                        scan_pos += 1;
+                    }
+                    _ => break,
+                }
+            }
+        }
+
+        false
+    }
+
+    fn parse_for_each_stmt(&mut self) -> Stmt {
+        let elem_type = self.parse_type_ref();
+        let name_token = self.expect_identifier().unwrap();
+        let name = match name_token.kind {
+            TokenKind::Identifier(s) => s,
+            _ => String::new(),
+        };
+
+        self.expect(TokenKind::In).ok();
+        let iterable = self.parse_expression();
+        self.expect(TokenKind::RightParen).ok();
+        let body = Box::new(self.parse_statement().unwrap());
+
+        Stmt::ForEach(elem_type, name, iterable, body)
+    }
+
+    fn parse_for_stmt_body(&mut self) -> Stmt {
+        let init = if self.peek_kind() != Some(TokenKind::Semicolon) {
+            let is_decl = matches!(
+                self.peek_kind(),
+                Some(TokenKind::Int | TokenKind::Long | TokenKind::Float |
+                     TokenKind::Double | TokenKind::Bool |
+                     TokenKind::Byte | TokenKind::Char | TokenKind::Short |
+                     TokenKind::Void)
+            );
+            if is_decl {
+                Some(self.parse_var_decl_for_init())
+            } else {
+                Some(Stmt::Expr(self.parse_expression()))
+            }
+        } else {
+            None
+        };
+        self.expect(TokenKind::Semicolon).ok();
+
+        let condition = if self.peek_kind() != Some(TokenKind::Semicolon) {
+            Some(self.parse_expression())
+        } else {
+            None
+        };
+        self.expect(TokenKind::Semicolon).ok();
+
+        let update = if self.peek_kind() != Some(TokenKind::RightParen) {
+            Some(self.parse_expression())
+        } else {
+            None
+        };
+        self.expect(TokenKind::RightParen).ok();
+
+        let body = Box::new(self.parse_statement().unwrap());
+
+        Stmt::For(init.map(Box::new), condition, update, body)
+    }
+
+    fn parse_switch_stmt(&mut self) -> Stmt {
+        self.advance();
+        self.expect(TokenKind::LeftParen).ok();
+        let subject = self.parse_expression();
+        self.expect(TokenKind::RightParen).ok();
+
+        self.expect(TokenKind::LeftBrace).ok();
+        let mut cases = Vec::new();
+        let mut default_body = None;
+
+        while !self.check_keyword(TokenKind::RightBrace) && !self.is_at_end() {
+            if self.check_keyword(TokenKind::Case) {
+                self.advance();
+                let mut patterns = Vec::new();
+                patterns.push(self.parse_expression());
+                while self.match_token(TokenKind::Comma) {
+                    patterns.push(self.parse_expression());
+                }
+                self.expect(TokenKind::Colon).ok();
+                let body = self.parse_switch_case_body();
+                cases.push(SwitchCase { patterns, body });
+            } else if self.check_keyword(TokenKind::Default) {
+                self.advance();
+                self.expect(TokenKind::Colon).ok();
+                default_body = Some(self.parse_switch_case_body());
+            } else {
+                self.advance();
+            }
+        }
+        self.expect(TokenKind::RightBrace).ok();
+
+        Stmt::Switch(subject, cases, default_body)
+    }
+
+    fn parse_switch_case_body(&mut self) -> Block {
+        let mut statements = Vec::new();
+        while !self.check_keyword(TokenKind::RightBrace)
+            && !self.check_keyword(TokenKind::Case)
+            && !self.check_keyword(TokenKind::Default)
+            && !self.is_at_end()
+        {
+            if let Some(stmt) = self.parse_statement() {
+                statements.push(stmt);
+            } else {
+                break;
+            }
+        }
+        Block { statements }
+    }
+
+    fn parse_match_expression(&mut self) -> Expr {
+        self.advance();
+        self.expect(TokenKind::LeftParen).ok();
+        let subject = self.parse_expression();
+        self.expect(TokenKind::RightParen).ok();
+
+        self.expect(TokenKind::LeftBrace).ok();
+        let mut arms = Vec::new();
+        while !self.check_keyword(TokenKind::RightBrace) && !self.is_at_end() {
+            if let Some(arm) = self.parse_match_arm() {
+                arms.push(arm);
+                if !self.match_token(TokenKind::Comma) {
+                    if self.check_keyword(TokenKind::RightBrace) {
+                        break;
+                    }
+                }
+            } else {
+                self.advance();
+            }
+        }
+        self.expect(TokenKind::RightBrace).ok();
+
+        Expr::Match(Box::new(subject), arms)
+    }
+
+    fn parse_match_arm(&mut self) -> Option<MatchArm> {
+        let pattern = self.parse_match_pattern()?;
+        self.expect(TokenKind::FatArrow).ok();
+
+        let body = if self.peek_kind() == Some(TokenKind::LeftBrace) {
+            MatchBody::Block(self.parse_block())
+        } else {
+            MatchBody::Expr(self.parse_expression())
+        };
+
+        Some(MatchArm { pattern, body })
+    }
+
+    fn parse_match_pattern(&mut self) -> Option<MatchPattern> {
+        if let Some(TokenKind::Identifier(name)) = self.peek().map(|t| t.kind.clone()) {
+            if name == "_" {
+                self.advance();
+                return Some(MatchPattern::Wildcard);
+            }
+
+            self.advance();
+            let bindings = if self.peek_kind() == Some(TokenKind::LeftParen) {
+                self.advance();
+                self.parse_match_bindings()
+            } else {
+                Vec::new()
+            };
+
+            if self.peek_kind() == Some(TokenKind::Pipe) {
+                let mut patterns = vec![MatchPattern::Variant(name, bindings)];
+                while self.match_token(TokenKind::Pipe) {
+                    if let Some(p) = self.parse_match_pattern() {
+                        patterns.push(p);
+                    }
+                }
+                Some(MatchPattern::Or(patterns))
+            } else {
+                Some(MatchPattern::Variant(name, bindings))
+            }
+        } else {
+            let expr = self.parse_expression();
+            Some(MatchPattern::Literal(expr))
+        }
+    }
+
+    fn parse_match_bindings(&mut self) -> Vec<MatchBinding> {
+        let mut bindings = Vec::new();
+        while !self.check_keyword(TokenKind::RightParen) && !self.is_at_end() {
+            let field_type = self.parse_type_ref();
+            let name_token = self.expect_identifier().ok();
+            let name = match name_token {
+                Some(t) => match t.kind {
+                    TokenKind::Identifier(s) => s,
+                    _ => String::new(),
+                },
+                None => break,
+            };
+            bindings.push(MatchBinding { field_type, name });
+            if !self.match_token(TokenKind::Comma) {
+                break;
+            }
+        }
+        self.expect(TokenKind::RightParen).ok();
+        bindings
     }
 }

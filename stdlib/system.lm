@@ -7,7 +7,7 @@ public class System {
     public static final int EXIT_SUCCESS = 0;
     public static final int EXIT_FAILURE = 1;
 
-    public static void exit(int code) {
+    public static void exitWithCode(int code) {
         exit(code);
     }
 
@@ -18,26 +18,67 @@ public class System {
     public static void exitFailure() {
         exit(1);
     }
+
+    public static void abortProgram() {
+        abort();
+    }
+
+    public static int runCommand(String command) {
+        return system(command);
+    }
+
+    public static String getEnv(String name) {
+        return getenv(name);
+    }
+
+    public static int processId() {
+        return getpid();
+    }
+
+    public static int parentProcessId() {
+        return getppid();
+    }
 }
 
 public class Assert {
-    public static void assertTrue(bool condition) {
+    public static void isTrue(bool condition) {
         if (!condition) {
             printf("Assertion failed\n");
             exit(1);
         }
     }
 
-    public static void assertTrue(bool condition, String message) {
+    public static void isTrue(bool condition, String message) {
         if (!condition) {
             printf("Assertion failed: %s\n", message);
             exit(1);
         }
     }
 
-    public static void assertEquals(int expected, int actual) {
+    public static void isFalse(bool condition) {
+        if (condition) {
+            printf("Assertion failed\n");
+            exit(1);
+        }
+    }
+
+    public static void equalsInt(int expected, int actual) {
         if (expected != actual) {
             printf("Assertion failed: expected %d, got %d\n", expected, actual);
+            exit(1);
+        }
+    }
+
+    public static void equalsBool(bool expected, bool actual) {
+        if (expected != actual) {
+            printf("Assertion failed: boolean values differ\n");
+            exit(1);
+        }
+    }
+
+    public static void notNull(String value) {
+        if (value == null) {
+            printf("Assertion failed: value is null\n");
             exit(1);
         }
     }
