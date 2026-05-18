@@ -1,0 +1,15 @@
+package lemon.lexer;
+
+class Span {
+    public int start;
+    public int end;
+    public int line;
+    public int column;
+
+    public Span(int s, int e, int l, int c) {
+        this.start = s;
+        this.end = e;
+        this.line = l;
+        this.column = c;
+    }
+}

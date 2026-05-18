@@ -1,0 +1,395 @@
+package lemon.lexer;
+
+class Lexer {
+    private String source;
+    private int pos;
+    private int line;
+    private int col;
+
+    public Lexer(String src) {
+        this.source = src;
+        this.pos = 0;
+        this.line = 1;
+        this.col = 1;
+    }
+
+    public Array<Token> tokenize() {
+        Array<Token> tokens = new Array<Token>();
+        while (true) {
+            Token tok = this.nextToken();
+            tokens.add(tok);
+            if (tok.kind == TokenKind.EndOfFile) {
+                break;
+            }
+        }
+        return tokens;
+    }
+
+    public Token nextToken() {
+        this.skipWhitespace();
+
+        int startPos = this.pos;
+        int startLine = this.line;
+        int startCol = this.col;
+
+        char c = this.peekChar();
+        if (c == '\0') {
+            return this.makeToken(TokenKind.EndOfFile, startPos);
+        }
+
+        if (c == '(') { this.advance(); return this.makeToken(TokenKind.LeftParen, startPos); }
+        if (c == ')') { this.advance(); return this.makeToken(TokenKind.RightParen, startPos); }
+        if (c == '{') { this.advance(); return this.makeToken(TokenKind.LeftBrace, startPos); }
+        if (c == '}') { this.advance(); return this.makeToken(TokenKind.RightBrace, startPos); }
+        if (c == '[') { this.advance(); return this.makeToken(TokenKind.LeftBracket, startPos); }
+        if (c == ']') { this.advance(); return this.makeToken(TokenKind.RightBracket, startPos); }
+        if (c == ',') { this.advance(); return this.makeToken(TokenKind.Comma, startPos); }
+        if (c == '.') { this.advance(); return this.makeToken(TokenKind.Dot, startPos); }
+        if (c == ';') { this.advance(); return this.makeToken(TokenKind.Semicolon, startPos); }
+        if (c == ':') { this.advance(); return this.makeToken(TokenKind.Colon, startPos); }
+        if (c == '?') { this.advance(); return this.makeToken(TokenKind.Question, startPos); }
+        if (c == '~') { this.advance(); return this.makeToken(TokenKind.Tilde, startPos); }
+        if (c == '@') { this.advance(); return this.makeToken(TokenKind.At, startPos); }
+
+        if (c == '+') {
+            this.advance();
+            char next = this.peekChar();
+            if (next == '+') { this.advance(); return this.makeToken(TokenKind.Inc, startPos); }
+            if (next == '=') { this.advance(); return this.makeToken(TokenKind.PlusAssign, startPos); }
+            return this.makeToken(TokenKind.Plus, startPos);
+        }
+        if (c == '-') {
+            this.advance();
+            char next = this.peekChar();
+            if (next == '-') { this.advance(); return this.makeToken(TokenKind.Dec, startPos); }
+            if (next == '=') { this.advance(); return this.makeToken(TokenKind.MinusAssign, startPos); }
+            if (next == '>') { this.advance(); return this.makeToken(TokenKind.Arrow, startPos); }
+            return this.makeToken(TokenKind.Minus, startPos);
+        }
+        if (c == '*') {
+            this.advance();
+            if (this.peekChar() == '=') { this.advance(); return this.makeToken(TokenKind.StarAssign, startPos); }
+            return this.makeToken(TokenKind.Star, startPos);
+        }
+        if (c == '/') {
+            this.advance();
+            char next = this.peekChar();
+            if (next == '/') {
+                this.skipLineComment();
+                return this.nextToken();
+            }
+            if (next == '*') {
+                this.skipBlockComment();
+                return this.nextToken();
+            }
+            if (next == '=') { this.advance(); return this.makeToken(TokenKind.SlashAssign, startPos); }
+            return this.makeToken(TokenKind.Slash, startPos);
+        }
+        if (c == '%') {
+            this.advance();
+            if (this.peekChar() == '=') { this.advance(); return this.makeToken(TokenKind.PercentAssign, startPos); }
+            return this.makeToken(TokenKind.Percent, startPos);
+        }
+        if (c == '&') {
+            this.advance();
+            char next = this.peekChar();
+            if (next == '&') { this.advance(); return this.makeToken(TokenKind.And, startPos); }
+            if (next == '=') { this.advance(); return this.makeToken(TokenKind.AndAssign, startPos); }
+            return this.makeToken(TokenKind.Amp, startPos);
+        }
+        if (c == '|') {
+            this.advance();
+            char next = this.peekChar();
+            if (next == '|') { this.advance(); return this.makeToken(TokenKind.Or, startPos); }
+            if (next == '=') { this.advance(); return this.makeToken(TokenKind.OrAssign, startPos); }
+            return this.makeToken(TokenKind.Pipe, startPos);
+        }
+        if (c == '^') {
+            this.advance();
+            if (this.peekChar() == '=') { this.advance(); return this.makeToken(TokenKind.XorAssign, startPos); }
+            return this.makeToken(TokenKind.Caret, startPos);
+        }
+        if (c == '<') {
+            this.advance();
+            char next = this.peekChar();
+            if (next == '<') {
+                this.advance();
+                if (this.peekChar() == '=') { this.advance(); return this.makeToken(TokenKind.ShlAssign, startPos); }
+                return this.makeToken(TokenKind.Shl, startPos);
+            }
+            if (next == '=') { this.advance(); return this.makeToken(TokenKind.Le, startPos); }
+            return this.makeToken(TokenKind.Lt, startPos);
+        }
+        if (c == '>') {
+            this.advance();
+            char next = this.peekChar();
+            if (next == '>') {
+                this.advance();
+                if (this.peekChar() == '=') { this.advance(); return this.makeToken(TokenKind.ShrAssign, startPos); }
+                return this.makeToken(TokenKind.Shr, startPos);
+            }
+            if (next == '=') { this.advance(); return this.makeToken(TokenKind.Ge, startPos); }
+            return this.makeToken(TokenKind.Gt, startPos);
+        }
+        if (c == '=') {
+            this.advance();
+            char next = this.peekChar();
+            if (next == '=') { this.advance(); return this.makeToken(TokenKind.Eq, startPos); }
+            if (next == '>') { this.advance(); return this.makeToken(TokenKind.FatArrow, startPos); }
+            return this.makeToken(TokenKind.Assign, startPos);
+        }
+        if (c == '!') {
+            this.advance();
+            if (this.peekChar() == '=') { this.advance(); return this.makeToken(TokenKind.Ne, startPos); }
+            return this.makeToken(TokenKind.Not, startPos);
+        }
+
+        if (c == '"') {
+            return this.readString(startPos, startLine, startCol);
+        }
+        if (c == '\'') {
+            return this.readChar(startPos, startLine, startCol);
+        }
+
+        if (Character.isDigit(c)) {
+            return this.readNumber(startPos, startLine, startCol);
+        }
+
+        if (Character.isAlpha(c)) {
+            return this.readIdentifier(startPos, startLine, startCol);
+        }
+
+        this.advance();
+        return Token.withString(TokenKind.Error, "Unexpected character: " + String.fromChar(c),
+            new Span(startPos, this.pos, startLine, startCol));
+    }
+
+    private char peekChar() {
+        if (this.pos >= String.length(this.source)) {
+            return '\0';
+        }
+        return String.charAt(this.source, this.pos);
+    }
+
+    private char advance() {
+        if (this.pos >= String.length(this.source)) {
+            return '\0';
+        }
+        char c = String.charAt(this.source, this.pos);
+        this.pos = this.pos + 1;
+        if (c == '\n') {
+            this.line = this.line + 1;
+            this.col = 1;
+        } else {
+            this.col = this.col + 1;
+        }
+        return c;
+    }
+
+    private void skipWhitespace() {
+        while (true) {
+            char c = this.peekChar();
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                this.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    private void skipLineComment() {
+        while (true) {
+            char c = this.peekChar();
+            if (c == '\0') { break; }
+            this.advance();
+            if (c == '\n') { break; }
+        }
+    }
+
+    private void skipBlockComment() {
+        while (true) {
+            char c = this.peekChar();
+            if (c == '\0') { break; }
+            if (c == '*') {
+                this.advance();
+                if (this.peekChar() == '/') {
+                    this.advance();
+                    break;
+                }
+            } else {
+                this.advance();
+            }
+        }
+    }
+
+    private Token readString(int startPos, int startLine, int startCol) {
+        this.advance();
+
+        StringBuilder sb = new StringBuilder();
+        while (true) {
+            char c = this.peekChar();
+            if (c == '\0') {
+                return Token.withString(TokenKind.Error, "Unterminated string",
+                    new Span(startPos, this.pos, startLine, startCol));
+            }
+            if (c == '"') {
+                this.advance();
+                return Token.withString(TokenKind.StringLiteral, sb.toString(),
+                    new Span(startPos, this.pos, startLine, startCol));
+            }
+            if (c == '\\') {
+                this.advance();
+                char esc = this.peekChar();
+                if (esc == 'n') { sb.appendChar('\n'); this.advance(); }
+                else if (esc == 't') { sb.appendChar('\t'); this.advance(); }
+                else if (esc == 'r') { sb.appendChar('\r'); this.advance(); }
+                else if (esc == '\\') { sb.appendChar('\\'); this.advance(); }
+                else if (esc == '"') { sb.appendChar('"'); this.advance(); }
+                else { sb.appendChar(esc); this.advance(); }
+            } else {
+                sb.appendChar(c);
+                this.advance();
+            }
+        }
+    }
+
+    private Token readChar(int startPos, int startLine, int startCol) {
+        this.advance();
+
+        char value = '\0';
+        char c = this.peekChar();
+        if (c == '\\') {
+            this.advance();
+            char esc = this.peekChar();
+            if (esc == 'n') { value = '\n'; this.advance(); }
+            else if (esc == 't') { value = '\t'; this.advance(); }
+            else if (esc == 'r') { value = '\r'; this.advance(); }
+            else if (esc == '\\') { value = '\\'; this.advance(); }
+            else if (esc == '\'') { value = '\''; this.advance(); }
+            else { value = esc; this.advance(); }
+        } else {
+            value = c;
+            this.advance();
+        }
+
+        if (this.peekChar() == '\'') {
+            this.advance();
+            return Token.withChar(TokenKind.CharLiteral, value,
+                new Span(startPos, this.pos, startLine, startCol));
+        }
+        return Token.withString(TokenKind.Error, "Unterminated char literal",
+            new Span(startPos, this.pos, startLine, startCol));
+    }
+
+    private Token readNumber(int startPos, int startLine, int startCol) {
+        bool isFloat = false;
+        while (true) {
+            char c = this.peekChar();
+            if (Character.isDigit(c)) {
+                this.advance();
+            } else if (c == '.' && !isFloat) {
+                int nextPos = this.pos + 1;
+                if (nextPos < String.length(this.source)) {
+                    char nextChar = String.charAt(this.source, nextPos);
+                    if (Character.isDigit(nextChar)) {
+                        isFloat = true;
+                        this.advance();
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        String numStr = String.substring(this.source, startPos, this.pos - startPos);
+        if (isFloat) {
+            return Token.withFloat(TokenKind.FloatLiteral, String.toDouble(numStr),
+                new Span(startPos, this.pos, startLine, startCol));
+        }
+        return Token.withInt(TokenKind.IntegerLiteral, String.toLong(numStr),
+            new Span(startPos, this.pos, startLine, startCol));
+    }
+
+    private Token readIdentifier(int startPos, int startLine, int startCol) {
+        while (true) {
+            char c = this.peekChar();
+            if (Character.isAlphaNumeric(c)) {
+                this.advance();
+            } else {
+                break;
+            }
+        }
+
+        String ident = String.substring(this.source, startPos, this.pos - startPos);
+        int kind = this.lookupKeyword(ident);
+        if (kind == TokenKind.Identifier) {
+            return Token.withString(TokenKind.Identifier, ident,
+                new Span(startPos, this.pos, startLine, startCol));
+        }
+        return new Token(kind, new Span(startPos, this.pos, startLine, startCol));
+    }
+
+    private int lookupKeyword(String ident) {
+        if (String.equals(ident, "class")) return TokenKind.Class;
+        if (String.equals(ident, "interface")) return TokenKind.Interface;
+        if (String.equals(ident, "extends")) return TokenKind.Extends;
+        if (String.equals(ident, "implements")) return TokenKind.Implements;
+        if (String.equals(ident, "abstract")) return TokenKind.Abstract;
+        if (String.equals(ident, "virtual")) return TokenKind.Virtual;
+        if (String.equals(ident, "override")) return TokenKind.Override;
+        if (String.equals(ident, "final")) return TokenKind.Final;
+        if (String.equals(ident, "static")) return TokenKind.Static;
+        if (String.equals(ident, "public")) return TokenKind.Public;
+        if (String.equals(ident, "private")) return TokenKind.Private;
+        if (String.equals(ident, "reflectable")) return TokenKind.Reflectable;
+        if (String.equals(ident, "new")) return TokenKind.New;
+        if (String.equals(ident, "delete")) return TokenKind.Delete;
+        if (String.equals(ident, "null")) return TokenKind.Null;
+        if (String.equals(ident, "true")) return TokenKind.True;
+        if (String.equals(ident, "false")) return TokenKind.False;
+        if (String.equals(ident, "if")) return TokenKind.If;
+        if (String.equals(ident, "else")) return TokenKind.Else;
+        if (String.equals(ident, "for")) return TokenKind.For;
+        if (String.equals(ident, "while")) return TokenKind.While;
+        if (String.equals(ident, "return")) return TokenKind.Return;
+        if (String.equals(ident, "break")) return TokenKind.Break;
+        if (String.equals(ident, "continue")) return TokenKind.Continue;
+        if (String.equals(ident, "try")) return TokenKind.Try;
+        if (String.equals(ident, "catch")) return TokenKind.Catch;
+        if (String.equals(ident, "throw")) return TokenKind.Throw;
+        if (String.equals(ident, "import")) return TokenKind.Import;
+        if (String.equals(ident, "package")) return TokenKind.Package;
+        if (String.equals(ident, "extern")) return TokenKind.Extern;
+        if (String.equals(ident, "sizeof")) return TokenKind.Sizeof;
+        if (String.equals(ident, "typeid")) return TokenKind.TypeId;
+        if (String.equals(ident, "this")) return TokenKind.This;
+        if (String.equals(ident, "super")) return TokenKind.Super;
+        if (String.equals(ident, "instanceof")) return TokenKind.InstanceOf;
+        if (String.equals(ident, "as")) return TokenKind.As;
+        if (String.equals(ident, "finally")) return TokenKind.Finally;
+        if (String.equals(ident, "enum")) return TokenKind.Enum;
+        if (String.equals(ident, "match")) return TokenKind.Match;
+        if (String.equals(ident, "switch")) return TokenKind.Switch;
+        if (String.equals(ident, "case")) return TokenKind.Case;
+        if (String.equals(ident, "default")) return TokenKind.Default;
+        if (String.equals(ident, "in")) return TokenKind.In;
+        if (String.equals(ident, "void")) return TokenKind.Void;
+        if (String.equals(ident, "bool")) return TokenKind.Bool;
+        if (String.equals(ident, "byte")) return TokenKind.Byte;
+        if (String.equals(ident, "char")) return TokenKind.Char;
+        if (String.equals(ident, "short")) return TokenKind.Short;
+        if (String.equals(ident, "int")) return TokenKind.Int;
+        if (String.equals(ident, "long")) return TokenKind.Long;
+        if (String.equals(ident, "float")) return TokenKind.Float;
+        if (String.equals(ident, "double")) return TokenKind.Double;
+        return TokenKind.Identifier;
+    }
+
+    private Token makeToken(int kind, int startPos) {
+        return new Token(kind, new Span(startPos, this.pos, this.line, this.col));
+    }
+}

@@ -1,0 +1,66 @@
+package lemon.lexer;
+
+class Token {
+    public int kind;
+    public String strValue;
+    public long intValue;
+    public double floatValue;
+    public char charValue;
+    public Span span;
+
+    public Token(int k, Span s) {
+        this.kind = k;
+        this.span = s;
+        this.strValue = "";
+        this.intValue = 0;
+        this.floatValue = 0.0;
+        this.charValue = '\0';
+    }
+
+    public static Token withString(int k, String v, Span s) {
+        Token t = new Token(k, s);
+        t.strValue = v;
+        return t;
+    }
+
+    public static Token withInt(int k, long v, Span s) {
+        Token t = new Token(k, s);
+        t.intValue = v;
+        return t;
+    }
+
+    public static Token withFloat(int k, double v, Span s) {
+        Token t = new Token(k, s);
+        t.floatValue = v;
+        return t;
+    }
+
+    public static Token withChar(int k, char v, Span s) {
+        Token t = new Token(k, s);
+        t.charValue = v;
+        return t;
+    }
+
+    public String toString() {
+        String kindStr = TokenKind.toString(this.kind);
+        if (this.kind == TokenKind.Identifier) {
+            return "Identifier(" + this.strValue + ")";
+        }
+        if (this.kind == TokenKind.IntegerLiteral) {
+            return "Int(" + String.intToString((int)this.intValue) + ")";
+        }
+        if (this.kind == TokenKind.FloatLiteral) {
+            return "Float(" + String.doubleToString(this.floatValue) + ")";
+        }
+        if (this.kind == TokenKind.StringLiteral) {
+            return "String(" + this.strValue + ")";
+        }
+        if (this.kind == TokenKind.CharLiteral) {
+            return "Char(" + String.fromChar(this.charValue) + ")";
+        }
+        if (this.kind == TokenKind.Error) {
+            return "Error(" + this.strValue + ")";
+        }
+        return kindStr;
+    }
+}
