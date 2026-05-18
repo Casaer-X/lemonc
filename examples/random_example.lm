@@ -5,80 +5,80 @@ package examples;
 
 public class RandomExample {
     public static void main(String[] args) {
-        printf("=== 随机数生成示例 ===\n\n");
+        System.printf("=== 随机数生成示例 ===\n\n");
 
         // 1. 随机整数
-        printf("1. 随机整数 (0-99):\n");
+        System.printf("1. 随机整数 (0-99):\n");
         for (int i = 0; i < 10; i++) {
-            int r = rand() % 100;
-            printf("   %d", r);
+            int r = System.rand() % 100;
+            System.printf("   %d", r);
         }
-        printf("\n\n");
+        System.printf("\n\n");
 
         // 2. 指定范围的随机整数
-        printf("2. 随机整数 (10-20):\n");
+        System.printf("2. 随机整数 (10-20):\n");
         for (int i = 0; i < 10; i++) {
-            int r = 10 + (rand() % 11);
-            printf("   %d", r);
+            int r = 10 + (System.rand() % 11);
+            System.printf("   %d", r);
         }
-        printf("\n\n");
+        System.printf("\n\n");
 
         // 3. 模拟掷骰子
-        printf("3. 模拟掷骰子 (100次):\n");
+        System.printf("3. 模拟掷骰子 (100次):\n");
         int counts[] = {0, 0, 0, 0, 0, 0, 0};
         for (int i = 0; i < 100; i++) {
-            int roll = 1 + (rand() % 6);
+            int roll = 1 + (System.rand() % 6);
             counts[roll] = counts[roll] + 1;
         }
         int dice = 1;
         while (dice <= 6) {
-            printf("   点数 %d: %d 次\n", dice, counts[dice]);
+            System.printf("   点数 %d: %d 次\n", dice, counts[dice]);
             dice = dice + 1;
         }
-        printf("\n");
+        System.printf("\n");
 
         // 4. 从数组中随机选择
-        printf("4. 从数组中随机选择:\n");
+        System.printf("4. 从数组中随机选择:\n");
         Array<String> fruits = new Array();
         fruits.add("Apple");
         fruits.add("Banana");
         fruits.add("Cherry");
         fruits.add("Date");
         fruits.add("Elderberry");
-        printf("   数组: [Apple, Banana, Cherry, Date, Elderberry]\n");
-        printf("   随机选择: ");
+        System.printf("   数组: [Apple, Banana, Cherry, Date, Elderberry]\n");
+        System.printf("   随机选择: ");
         for (int i = 0; i < 5; i++) {
-            int idx = rand() % fruits.size();
-            printf("%s ", fruits.get(idx));
+            int idx = System.rand() % fruits.size();
+            System.printf("%s ", fruits.get(idx));
         }
-        printf("\n\n");
+        System.printf("\n\n");
 
         // 5. 随机种子
-        printf("5. 使用种子生成可重复的随机序列:\n");
-        srand(12345);
-        printf("   种子=12345: ");
+        System.printf("5. 使用种子生成可重复的随机序列:\n");
+        System.srand(12345);
+        System.printf("   种子=12345: ");
         for (int i = 0; i < 5; i++) {
-            printf("%d ", rand() % 100);
+            System.printf("%d ", System.rand() % 100);
         }
-        printf("\n");
+        System.printf("\n");
 
-        srand(12345);
-        printf("   再次种子=12345: ");
+        System.srand(12345);
+        System.printf("   再次种子=12345: ");
         for (int i = 0; i < 5; i++) {
-            printf("%d ", rand() % 100);
+            System.printf("%d ", System.rand() % 100);
         }
-        printf("\n\n");
+        System.printf("\n\n");
 
         // 6. 实例化对象
-        printf("6. 实例化对象:\n");
+        System.printf("6. 实例化对象:\n");
         Random rng = new Random(42);
-        printf("   随机数生成器 (seed=42): ");
+        System.printf("   随机数生成器 (seed=42): ");
         for (int i = 0; i < 5; i++) {
-            printf("%d ", rng.nextInt(100));
+            System.printf("%d ", rng.nextInt(100));
         }
-        printf("\n\n");
+        System.printf("\n\n");
 
-        printf("=== 示例结束 ===\n");
+        System.printf("=== 示例结束 ===\n");
     }
 }
 

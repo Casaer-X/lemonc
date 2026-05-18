@@ -1469,39 +1469,44 @@ impl Parser {
     }
 
     fn is_foreach_pattern(&self) -> bool {
-        let saved_pos = self.pos;
-        let mut lookahead = saved_pos;
+        let mut scan_pos = self.pos;
 
-        if lookahead >= self.tokens.len() {
+        if scan_pos >= self.tokens.len() {
             return false;
         }
 
-        if matches!(self.tokens[lookahead].kind, TokenKind::Identifier(_)) {
-            lookahead += 1;
-            if lookahead < self.tokens.len() {
-                if matches!(self.tokens[lookahead].kind, TokenKind::In) {
-                    return true;
+        if self.is_type_token() {
+            scan_pos += 1;
+            if scan_pos < self.tokens.len() {
+                if matches!(self.tokens[scan_pos].kind, TokenKind::Lt) {
+                    while scan_pos < self.tokens.len() {
+                        match &self.tokens[scan_pos].kind {
+                            TokenKind::Gt => { scan_pos += 1; break; }
+                            TokenKind::Shr => { scan_pos += 1; break; }
+                            _ => { scan_pos += 1; }
+                        }
+                    }
+                }
+            }
+            if scan_pos < self.tokens.len() {
+                if matches!(self.tokens[scan_pos].kind, TokenKind::Identifier(_)) {
+                    scan_pos += 1;
+                    if scan_pos < self.tokens.len() {
+                        if matches!(self.tokens[scan_pos].kind, TokenKind::In) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
 
-        if self.is_type_token() {
-            let mut scan_pos = self.pos;
-            while scan_pos < self.tokens.len() {
-                match &self.tokens[scan_pos].kind {
-                    TokenKind::Identifier(_) => {
-                        scan_pos += 1;
-                        if scan_pos < self.tokens.len() {
-                            if matches!(self.tokens[scan_pos].kind, TokenKind::In) {
-                                return true;
-                            }
-                        }
-                        break;
+        if scan_pos < self.tokens.len() {
+            if matches!(self.tokens[scan_pos].kind, TokenKind::Identifier(_)) {
+                scan_pos += 1;
+                if scan_pos < self.tokens.len() {
+                    if matches!(self.tokens[scan_pos].kind, TokenKind::In) {
+                        return true;
                     }
-                    TokenKind::Lt | TokenKind::LeftBracket | TokenKind::Star => {
-                        scan_pos += 1;
-                    }
-                    _ => break,
                 }
             }
         }

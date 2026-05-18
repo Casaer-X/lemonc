@@ -102,6 +102,7 @@ impl CCodeGen {
         self.emit_line("#include <stdlib.h>");
         self.emit_line("#include <string.h>");
         self.emit_line("#include <stdint.h>");
+        self.emit_line("#include <inttypes.h>");
         self.emit_line("#include <stdarg.h>");
         self.emit_line("#include <setjmp.h>");
         self.emit_line("");
@@ -190,7 +191,7 @@ impl CCodeGen {
         self.emit_line("}");
         self.emit_line("");
 
-        self.emit_line("int String_length(const char* s) { return s ? (int)strlen(s) : 0; }");
+        self.emit_line("int32_t String_length(const char* s) { return s ? (int32_t)strlen(s) : 0; }");
         self.emit_line("char* String_toUpperCase(const char* s) {");
         self.emit_line("    if (!s) return NULL;");
         self.emit_line("    char* r = strdup(s);");
@@ -331,7 +332,7 @@ impl CCodeGen {
         self.emit_line("}");
         self.emit_line("void StringBuilder_appendLong(StringBuilder* sb, int64_t v) {");
         self.emit_line("    char tmp[32];");
-        self.emit_line("    snprintf(tmp, sizeof(tmp), \"%lld\", (long long)v);");
+        self.emit_line("    snprintf(tmp, sizeof(tmp), \"%\" PRId64, v);");
         self.emit_line("    StringBuilder_append(sb, tmp);");
         self.emit_line("}");
         self.emit_line("void StringBuilder_appendFloat(StringBuilder* sb, float v) {");
@@ -452,7 +453,6 @@ impl CCodeGen {
         self.emit_line("int32_t Character_toInt(char c) { return (int32_t)c; }");
         self.emit_line("");
 
-        self.emit_line("int32_t String_length(const char* s) { return s ? (int32_t)strlen(s) : 0; }");
         self.emit_line("const char* String_fromCharArray(const char* buf, int32_t start, int32_t len) {");
         self.emit_line("    if (!buf || len <= 0) return strdup(\"\");");
         self.emit_line("    char* r = (char*)malloc(len + 1);");
@@ -481,6 +481,11 @@ impl CCodeGen {
         self.emit_line("    if (suflen > slen) return 0;");
         self.emit_line("    return strcmp(s + slen - suflen, suffix) == 0;");
         self.emit_line("}");
+        self.emit_line("typedef struct Array_String {");
+        self.emit_line("    int32_t length;");
+        self.emit_line("    int32_t capacity;");
+        self.emit_line("    void* data;");
+        self.emit_line("} Array_String;");
         self.emit_line("Array_String* String_split(const char* s, char delim) {");
         self.emit_line("    Array_String* result = (Array_String*)malloc(sizeof(Array_String));");
         self.emit_line("    result->length = 0;");
@@ -877,7 +882,20 @@ impl CCodeGen {
 
         for decl in &ast.declarations {
             match decl {
-                Declaration::Class(class) => self.generate_class(class),
+                Declaration::Class(class) => {
+                    for member in &class.members {
+                        if let ClassMember::Field(field) = member {
+                            let is_static = field.modifiers.iter().any(|m| matches!(m, VarModifier::Static));
+                            if is_static {
+                                if let Some(init) = &field.initializer {
+                                    let val = self.gen_expr(init);
+                                    self.emit_line(&format!("#define {}_{} {}", class.name.to_uppercase(), field.name, val));
+                                }
+                            }
+                        }
+                    }
+                    self.generate_class(class);
+                }
                 Declaration::Function(func) => self.generate_function(func),
                 _ => {}
             }
@@ -1548,7 +1566,19 @@ impl CCodeGen {
                 self.string_literals.push(s.clone());
                 format!("_str_{}", idx)
             }
-            Expr::CharLiteral(c) => format!("'{}'", c),
+            Expr::CharLiteral(c) => {
+                let escaped = match c {
+                    '\0' => "\\0".to_string(),
+                    '\n' => "\\n".to_string(),
+                    '\t' => "\\t".to_string(),
+                    '\r' => "\\r".to_string(),
+                    '\\' => "\\\\".to_string(),
+                    '\'' => "\\'".to_string(),
+                    c if (*c as u32) < 32 => format!("\\x{:02x}", *c as u32),
+                    c => c.to_string(),
+                };
+                format!("'{}'", escaped)
+            }
             Expr::BoolLiteral(b) => if *b { "1".to_string() } else { "0".to_string() },
             Expr::Null => "NULL".to_string(),
             Expr::This => "self".to_string(),
@@ -1599,6 +1629,15 @@ impl CCodeGen {
                         format!("{}({})", name, arg_strs.join(", "))
                     }
                     Expr::FieldAccess(obj, method) => {
+                        if let Expr::Variable(var_name) = obj.as_ref() {
+                            if var_name == "System" && self.is_system_builtin_method(method) {
+                                return format!("{}({})", method, arg_strs.join(", "));
+                            }
+                            if Self::is_simple_builtin_type(var_name) {
+                                return format!("{}_{}({})", var_name, method, arg_strs.join(", "));
+                            }
+                        }
+
                         let obj_str = self.gen_expr(obj);
                         let class_name = self.infer_class_from_expr(obj);
                         let fallback = self.infer_string_method(obj, method);
@@ -1641,6 +1680,17 @@ impl CCodeGen {
                 }
             }
             Expr::MethodCall(obj, method, args) => {
+                if let Expr::Variable(var_name) = obj.as_ref() {
+                    if var_name == "System" && self.is_system_builtin_method(method) {
+                        let arg_strs: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+                        return format!("{}({})", method, arg_strs.join(", "));
+                    }
+                    if Self::is_simple_builtin_type(var_name) {
+                        let arg_strs: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
+                        return format!("{}_{}({})", var_name, method, arg_strs.join(", "));
+                    }
+                }
+
                 let arg_strs: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
                 let args_str = if arg_strs.is_empty() { String::new() } else { format!(", {}", arg_strs.join(", ")) };
                 let class_name = self.infer_class_from_expr(obj);
@@ -1671,6 +1721,17 @@ impl CCodeGen {
                 }
             }
             Expr::FieldAccess(obj, field) => {
+                if let Expr::Variable(var_name) = obj.as_ref() {
+                    if self.enums.contains_key(var_name) {
+                        return format!("{}_KIND_{}", var_name, field);
+                    }
+                    if Self::is_simple_builtin_type(var_name) {
+                        return format!("{}_{}", var_name, field);
+                    }
+                    if self.class_fields.contains_key(var_name) {
+                        return format!("{}_{}", var_name.to_uppercase(), field);
+                    }
+                }
                 let obj_str = self.gen_expr(obj);
                 let is_ptr = self.is_pointer_expr(obj);
                 let access = if is_ptr { "->" } else { "." };
@@ -1724,6 +1785,30 @@ impl CCodeGen {
                 self.gen_match_expr(subject, arms)
             }
         }
+    }
+
+    fn is_system_builtin_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "printf" | "fprintf" | "sprintf" | "snprintf" | "vsnprintf"
+            | "malloc" | "free" | "realloc" | "calloc"
+            | "exit" | "abort"
+            | "memcpy" | "memset" | "memmove"
+            | "strlen" | "strcmp" | "strncmp" | "strdup" | "strstr"
+            | "fopen" | "fclose" | "fread" | "fwrite" | "fseek" | "ftell" | "fgets" | "fputs" | "fputc" | "fgetc" | "ungetc" | "feof" | "ferror" | "fflush"
+            | "scanf" | "sscanf" | "getchar" | "putchar"
+            | "rand" | "srand" | "time" | "clock"
+            | "sin" | "cos" | "tan" | "sqrt" | "pow" | "log" | "log10" | "exp" | "fabs" | "ceil" | "floor" | "round" | "fmod"
+            | "system" | "getenv" | "getpid" | "getppid"
+            | "gc_init" | "gc_mark" | "gc_sweep" | "gc_alloc" | "type_of"
+        )
+    }
+
+    fn is_simple_builtin_type(name: &str) -> bool {
+        matches!(
+            name,
+            "String" | "StringBuilder" | "Character"
+        )
     }
 
     fn infer_class_from_expr(&self, expr: &Expr) -> Option<String> {

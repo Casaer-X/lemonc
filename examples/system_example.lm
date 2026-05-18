@@ -5,85 +5,85 @@ package examples;
 
 public class SystemExample {
     public static void main(String[] args) {
-        printf("=== 系统与断言示例 ===\n\n");
+        System.printf("=== 系统与断言示例 ===\n\n");
 
         // 1. 基本断言
-        printf("1. 基本断言:\n");
-        printf("   测试 1 + 1 == 2...\n");
+        System.printf("1. 基本断言:\n");
+        System.printf("   测试 1 + 1 == 2...\n");
         SystemExample.assertTrue(1 + 1 == 2);
-        printf("   通过!\n");
-        printf("   测试 10 > 5...\n");
+        System.printf("   通过!\n");
+        System.printf("   测试 10 > 5...\n");
         SystemExample.assertTrue(10 > 5);
-        printf("   通过!\n");
+        System.printf("   通过!\n");
 
         // 2. 相等断言
-        printf("\n2. 相等断言:\n");
-        printf("   测试 42 == 42...\n");
+        System.printf("\n2. 相等断言:\n");
+        System.printf("   测试 42 == 42...\n");
         SystemExample.assertEquals(42, 42);
-        printf("   通过!\n");
+        System.printf("   通过!\n");
 
         // 3. 数学计算断言
-        printf("\n3. 数学计算断言:\n");
+        System.printf("\n3. 数学计算断言:\n");
         int result = 5 * 5;
-        printf("   测试 5 * 5 == 25...\n");
+        System.printf("   测试 5 * 5 == 25...\n");
         SystemExample.assertEquals(result, 25);
-        printf("   通过!\n");
+        System.printf("   通过!\n");
 
         int fact = SystemExample.factorial(5);
-        printf("   测试 factorial(5) == 120...\n");
+        System.printf("   测试 factorial(5) == 120...\n");
         SystemExample.assertEquals(fact, 120);
-        printf("   通过!\n");
+        System.printf("   通过!\n");
 
         // 4. 数组操作断言
-        printf("\n4. 数组操作断言:\n");
+        System.printf("\n4. 数组操作断言:\n");
         Array<int> arr = new Array();
         arr.add(1);
         arr.add(2);
         arr.add(3);
         int sum = SystemExample.sumArray(arr);
-        printf("   测试 sum([1,2,3]) == 6...\n");
+        System.printf("   测试 sum([1,2,3]) == 6...\n");
         SystemExample.assertEquals(sum, 6);
-        printf("   通过!\n");
+        System.printf("   通过!\n");
 
         int maxVal = SystemExample.maxArray(arr);
-        printf("   测试 max([1,2,3]) == 3...\n");
+        System.printf("   测试 max([1,2,3]) == 3...\n");
         SystemExample.assertEquals(maxVal, 3);
-        printf("   通过!\n");
+        System.printf("   通过!\n");
 
         // 5. 排序断言
-        printf("\n5. 排序断言:\n");
+        System.printf("\n5. 排序断言:\n");
         Array<int> unsorted = new Array();
         unsorted.add(3);
         unsorted.add(1);
         unsorted.add(2);
         SystemExample.bubbleSort(unsorted);
-        printf("   测试排序后 [3,1,2] -> [1,2,3]...\n");
+        System.printf("   测试排序后 [3,1,2] -> [1,2,3]...\n");
         SystemExample.assertEquals(unsorted.get(0), 1);
         SystemExample.assertEquals(unsorted.get(1), 2);
         SystemExample.assertEquals(unsorted.get(2), 3);
-        printf("   通过!\n");
+        System.printf("   通过!\n");
 
         // 6. 综合测试
-        printf("\n6. 综合测试:\n");
+        System.printf("\n6. 综合测试:\n");
         SystemExample.testMathFunctions();
         SystemExample.testArrayFunctions();
 
-        printf("\n7. 系统信息:\n");
-        printf("   程序正常执行中...\n");
-        printf("   所有测试通过!\n");
+        System.printf("\n7. 系统信息:\n");
+        System.printf("   程序正常执行中...\n");
+        System.printf("   所有测试通过!\n");
 
-        printf("\n=== 示例结束 ===\n");
+        System.printf("\n=== 示例结束 ===\n");
     }
 
     public static void assertTrue(bool condition) {
         if (!condition) {
-            printf("   ASSERTION FAILED!\n");
+            System.printf("   ASSERTION FAILED!\n");
         }
     }
 
     public static void assertEquals(int expected, int actual) {
         if (expected != actual) {
-            printf("   ASSERTION FAILED: expected %d, got %d\n", expected, actual);
+            System.printf("   ASSERTION FAILED: expected %d, got %d\n", expected, actual);
         }
     }
 
@@ -138,18 +138,18 @@ public class SystemExample {
     }
 
     public static void testMathFunctions() {
-        printf("   测试数学函数...\n");
+        System.printf("   测试数学函数...\n");
         SystemExample.assertEquals(SystemExample.factorial(0), 1);
         SystemExample.assertEquals(SystemExample.factorial(1), 1);
         SystemExample.assertEquals(SystemExample.factorial(5), 120);
         SystemExample.assertEquals(SystemExample.powInt(2, 10), 1024);
         SystemExample.assertEquals(SystemExample.gcd(48, 18), 6);
         SystemExample.assertEquals(SystemExample.lcm(4, 6), 12);
-        printf("   数学函数测试通过!\n");
+        System.printf("   数学函数测试通过!\n");
     }
 
     public static void testArrayFunctions() {
-        printf("   测试数组函数...\n");
+        System.printf("   测试数组函数...\n");
         Array<int> arr = new Array();
         arr.add(1);
         arr.add(2);
@@ -161,7 +161,7 @@ public class SystemExample {
         SystemExample.reverseArray(arr);
         SystemExample.assertEquals(arr.get(0), 5);
         SystemExample.assertEquals(arr.get(4), 1);
-        printf("   数组函数测试通过!\n");
+        System.printf("   数组函数测试通过!\n");
     }
 
     public static int powInt(int base, int exp) {

@@ -639,7 +639,22 @@ impl NativeCodeGen {
                     }
                     Expr::FieldAccess(obj, method) => {
                         if let Expr::Variable(class_name) = obj.as_ref() {
-                            if !self.var_stack.contains_key(class_name) {
+                            if class_name == "System" && self.is_system_builtin_method(method) {
+                                let aregs = [Reg::Rcx, Reg::Rdx, Reg::R8, Reg::R9];
+                                for (i, arg) in args.iter().enumerate() {
+                                    self.expr_rax(arg);
+                                    self.emit(&[0x50]);
+                                }
+                                for i in (0..args.len().min(aregs.len())).rev() {
+                                    self.emit_pop_reg(aregs[i]);
+                                }
+                                self.emit_sub_rsp(32);
+                                self.emit(&[0xE8]);
+                                let off = self.text.len() as u32;
+                                self.emit_rel32(0);
+                                self.relocs.push((off, method.clone()));
+                                self.emit_add_rsp(32);
+                            } else if !self.var_stack.contains_key(class_name) {
                                 let aregs = [Reg::Rcx, Reg::Rdx, Reg::R8, Reg::R9];
                                 self.emit_mov_rax_imm(0);
                                 self.emit(&[0x50]);
@@ -725,6 +740,26 @@ impl NativeCodeGen {
                 }
             }
             Expr::MethodCall(obj, method, args) => {
+                if let Expr::Variable(var_name) = obj.as_ref() {
+                    if var_name == "System" && self.is_system_builtin_method(method) {
+                        let aregs = [Reg::Rcx, Reg::Rdx, Reg::R8, Reg::R9];
+                        for (i, arg) in args.iter().enumerate() {
+                            self.expr_rax(arg);
+                            self.emit(&[0x50]);
+                        }
+                        for i in (0..args.len().min(aregs.len())).rev() {
+                            self.emit_pop_reg(aregs[i]);
+                        }
+                        self.emit_sub_rsp(32);
+                        self.emit(&[0xE8]);
+                        let off = self.text.len() as u32;
+                        self.emit_rel32(0);
+                        self.relocs.push((off, method.clone()));
+                        self.emit_add_rsp(32);
+                        return;
+                    }
+                }
+
                 let cn = self.infer_class(obj);
                 let aregs = [Reg::Rdx, Reg::R8, Reg::R9];
                 self.expr_rax(obj);
@@ -799,6 +834,23 @@ impl NativeCodeGen {
                 self.emit(&[0x48, 0x31, 0xC0]);
             }
         }
+    }
+
+    fn is_system_builtin_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "printf" | "fprintf" | "sprintf" | "snprintf" | "vsnprintf"
+            | "malloc" | "free" | "realloc" | "calloc"
+            | "exit" | "abort"
+            | "memcpy" | "memset" | "memmove"
+            | "strlen" | "strcmp" | "strncmp" | "strdup" | "strstr"
+            | "fopen" | "fclose" | "fread" | "fwrite" | "fseek" | "ftell" | "fgets" | "fputs" | "fputc" | "fgetc" | "ungetc" | "feof" | "ferror" | "fflush"
+            | "scanf" | "sscanf" | "getchar" | "putchar"
+            | "rand" | "srand" | "time" | "clock"
+            | "sin" | "cos" | "tan" | "sqrt" | "pow" | "log" | "log10" | "exp" | "fabs" | "ceil" | "floor" | "round" | "fmod"
+            | "system" | "getenv" | "getpid" | "getppid"
+            | "gc_init" | "gc_mark" | "gc_sweep" | "gc_alloc" | "type_of"
+        )
     }
 
     fn infer_class(&self, expr: &Expr) -> Option<String> {

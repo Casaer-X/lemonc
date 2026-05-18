@@ -2,16 +2,17 @@ package lemon.lexer;
 
 class LexerTest {
     public static void main(String[] args) {
-        String source = "class Foo extends Bar { int x = 42; void hello() { System.out.println(\"hi\"); } }";
+        String source = "class Foo extends Bar { int x = 42; void hello() { System.printf(\"hi\"); } }";
         Lexer lexer = new Lexer(source);
         Array<Token> tokens = lexer.tokenize();
 
         int i = 0;
-        for (Token tok in tokens) {
+        while (i < tokens.size()) {
+            Token tok = tokens.get(i);
             String posInfo = "L" + tok.span.line + "C" + tok.span.column;
-            System.out.println(posInfo + ": " + tok.toString());
+            System.printf("%s: %s\n", posInfo, tok.toString());
             i = i + 1;
         }
-        System.out.println("Total tokens: " + i);
+        System.printf("Total tokens: %d\n", i);
     }
 }

@@ -65,21 +65,72 @@ fn main() {
     let keep_intermediate = args.contains(&"--keep-intermediate".to_string());
     let target = get_target(&args);
 
-    let input = args.iter()
+    let input_files: Vec<String> = args.iter()
         .skip(1)
-        .find(|a| !a.starts_with('-'))
-        .expect("No input file specified");
+        .filter(|a| !a.starts_with('-') && a.ends_with(".lm"))
+        .cloned()
+        .collect();
 
-    let source = match fs::read_to_string(input) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error reading file '{}': {}", input, e);
+    if input_files.is_empty() {
+        eprintln!("Error: No input file specified");
+        std::process::exit(1);
+    }
+
+    let primary_input = &input_files[0];
+
+    let mut all_declarations = Vec::new();
+    let mut total_tokens = 0usize;
+    let mut annotation_config = AnnotationParser::new().parse_source_annotations("");
+
+    for (file_idx, input) in input_files.iter().enumerate() {
+        let source = match fs::read_to_string(input) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Error reading file '{}': {}", input, e);
+                std::process::exit(1);
+            }
+        };
+
+        if file_idx == 0 {
+            annotation_config = AnnotationParser::new().parse_source_annotations(&source);
+        }
+
+        println!("[1/5] Lexical analysis{}...", if input_files.len() > 1 { format!(" ({}/{})", file_idx + 1, input_files.len()) } else { String::new() });
+        let lexer = Lexer::new(&source);
+        let tokens: Vec<_> = lexer.collect();
+        total_tokens += tokens.len();
+
+        if lex_only && file_idx == input_files.len() - 1 {
+            println!("  Tokenized {} tokens (total)", total_tokens);
+            println!("\nLexing complete!");
+            return;
+        }
+
+        println!("[2/5] Parsing{}...", if input_files.len() > 1 { format!(" ({}/{})", file_idx + 1, input_files.len()) } else { String::new() });
+        let mut parser = Parser::new(tokens);
+        let program = parser.parse();
+
+        if parser.has_errors() {
+            eprintln!("\nParse errors in '{}':", input);
+            for error in parser.errors() {
+                eprintln!("  {}", error);
+            }
             std::process::exit(1);
         }
-    };
 
-    // 检查源文件中的编译注解，自动选择目标
-    let annotation_config = AnnotationParser::new().parse_source_annotations(&source);
+        all_declarations.extend(program.declarations);
+    }
+
+    println!("  Tokenized {} tokens (total from {} files)", total_tokens, input_files.len());
+
+    let mut program = ast::node::Program { declarations: all_declarations };
+    println!("  Parsed {} declarations (total)", program.declarations.len());
+
+    if parse_only {
+        println!("\nParsing complete!");
+        return;
+    }
+
     let effective_target = if target == "c" && annotation_config.target != CompileTarget::C {
         println!("  [Auto-detect] Using target from source annotation: {:?}", annotation_config.target);
         match annotation_config.target {
@@ -93,36 +144,7 @@ fn main() {
     } else {
         target
     };
-    let output_file = get_output_file(&args, input, &effective_target, annotation_config.output_name.as_deref());
-
-    println!("[1/5] Lexical analysis...");
-    let lexer = Lexer::new(&source);
-    let tokens: Vec<_> = lexer.collect();
-    println!("  Tokenized {} tokens", tokens.len());
-
-    if lex_only {
-        println!("\nLexing complete!");
-        return;
-    }
-
-    println!("\n[2/5] Parsing...");
-    let mut parser = Parser::new(tokens);
-    let mut program = parser.parse();
-
-    if parser.has_errors() {
-        eprintln!("\nParse errors:");
-        for error in parser.errors() {
-            eprintln!("  {}", error);
-        }
-        std::process::exit(1);
-    }
-
-    println!("  Parsed {} declarations", program.declarations.len());
-
-    if parse_only {
-        println!("\nParsing complete!");
-        return;
-    }
+    let output_file = get_output_file(&args, primary_input, &effective_target, annotation_config.output_name.as_deref());
 
     println!("\n[2.5/5] Semantic analysis...");
     let mut semantic = ast::semantic::SemanticAnalyzer::new();
@@ -164,7 +186,7 @@ fn main() {
         let coff_bytes = native_gen.generate(&program);
 
         let os = detect_os();
-        let obj_path = format!("{}.obj", input.trim_end_matches(".lm"));
+        let obj_path = format!("{}.obj", primary_input.trim_end_matches(".lm"));
         match fs::write(&obj_path, &coff_bytes) {
             Ok(_) => println!("  Object file written to: {}", obj_path),
             Err(e) => {
@@ -192,7 +214,7 @@ fn main() {
         let lmb_path = if effective_target == "bytecode" {
             format!("{}", output_file)
         } else {
-            format!("{}.lmb", input.trim_end_matches(".lm"))
+            format!("{}.lmb", primary_input.trim_end_matches(".lm"))
         };
         
         let mut file = match std::fs::File::create(&lmb_path) {
@@ -262,7 +284,7 @@ fn main() {
     };
 
     if effective_target == "exe" {
-        compile_to_exe(&code, &output_file, codegen_target, keep_intermediate, input);
+        compile_to_exe(&code, &output_file, codegen_target, keep_intermediate, primary_input);
     } else {
         match fs::write(&output_file, &code) {
             Ok(_) => {
@@ -716,10 +738,11 @@ fn get_opt_level(args: &[String], annotation_level: u32) -> u32 {
 }
 
 fn print_usage() {
-    eprintln!("Lemon Compiler (lemonc) v1.0.0");
+    eprintln!("Lemon Compiler (lemonc) v1.2.0");
     eprintln!("Usage:");
-    eprintln!("  lemonc <file.lm> [options]     Compile a single file");
-    eprintln!("  lemonc --build [dir]            Build entire project");
+    eprintln!("  lemonc <file.lm> [options]           Compile a single file");
+    eprintln!("  lemonc <f1.lm> <f2.lm> ... [options] Compile multiple files together");
+    eprintln!("  lemonc --build [dir]                  Build entire project");
     eprintln!("");
     eprintln!("Options:");
     eprintln!("  -o <file>       Output file");

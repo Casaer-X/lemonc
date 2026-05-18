@@ -5,42 +5,42 @@ package io;
 
 public class Console {
     public static void print(String value) {
-        printf("%s", value);
+        System.printf("%s", value);
     }
 
     public static void println(String value) {
-        printf("%s\n", value);
+        System.printf("%s\n", value);
     }
 
     public static void printInt(int value) {
-        printf("%d", value);
+        System.printf("%d", value);
     }
 
     public static void printlnInt(int value) {
-        printf("%d\n", value);
+        System.printf("%d\n", value);
     }
 
     public static void printLong(long value) {
-        printf("%ld", value);
+        System.printf("%ld", value);
     }
 
     public static void printlnLong(long value) {
-        printf("%ld\n", value);
+        System.printf("%ld\n", value);
     }
 
     public static void printDouble(double value) {
-        printf("%f", value);
+        System.printf("%f", value);
     }
 
     public static void printlnDouble(double value) {
-        printf("%f\n", value);
+        System.printf("%f\n", value);
     }
 
     public static void printBool(bool value) {
         if (value) {
-            printf("true");
+            System.printf("true");
         } else {
-            printf("false");
+            System.printf("false");
         }
     }
 
@@ -50,19 +50,19 @@ public class Console {
     }
 
     public static void printChar(char value) {
-        printf("%c", value);
+        System.printf("%c", value);
     }
 
     public static void printlnChar(char value) {
-        printf("%c\n", value);
+        System.printf("%c\n", value);
     }
 
     public static void newLine() {
-        printf("\n");
+        System.printf("\n");
     }
 
     public static void space() {
-        printf(" ");
+        System.printf(" ");
     }
 
     public static int readInt() {
@@ -78,20 +78,20 @@ public class Console {
     }
 
     public static char readChar() {
-        return getchar();
+        return System.getchar();
     }
 }
 
 public class Format {
     public static void printLabelInt(String label, int value) {
-        printf("%s%d\n", label, value);
+        System.printf("%s%d\n", label, value);
     }
 
     public static void printLabelDouble(String label, double value) {
-        printf("%s%f\n", label, value);
+        System.printf("%s%f\n", label, value);
     }
 
     public static void printLabelString(String label, String value) {
-        printf("%s%s\n", label, value);
+        System.printf("%s%s\n", label, value);
     }
 }

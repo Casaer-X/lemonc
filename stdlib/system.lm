@@ -8,15 +8,15 @@ public class System {
     public static final int EXIT_FAILURE = 1;
 
     public static void exitWithCode(int code) {
-        exit(code);
+        System.exit(code);
     }
 
     public static void exitSuccess() {
-        exit(0);
+        System.exit(0);
     }
 
     public static void exitFailure() {
-        exit(1);
+        System.exit(1);
     }
 
     public static void abortProgram() {
@@ -24,11 +24,11 @@ public class System {
     }
 
     public static int runCommand(String command) {
-        return system(command);
+        return System.system(command);
     }
 
     public static String getEnv(String name) {
-        return getenv(name);
+        return System.getenv(name);
     }
 
     public static int processId() {
@@ -43,43 +43,43 @@ public class System {
 public class Assert {
     public static void isTrue(bool condition) {
         if (!condition) {
-            printf("Assertion failed\n");
-            exit(1);
+            System.printf("Assertion failed\n");
+            System.exit(1);
         }
     }
 
     public static void isTrue(bool condition, String message) {
         if (!condition) {
-            printf("Assertion failed: %s\n", message);
-            exit(1);
+            System.printf("Assertion failed: %s\n", message);
+            System.exit(1);
         }
     }
 
     public static void isFalse(bool condition) {
         if (condition) {
-            printf("Assertion failed\n");
-            exit(1);
+            System.printf("Assertion failed\n");
+            System.exit(1);
         }
     }
 
     public static void equalsInt(int expected, int actual) {
         if (expected != actual) {
-            printf("Assertion failed: expected %d, got %d\n", expected, actual);
-            exit(1);
+            System.printf("Assertion failed: expected %d, got %d\n", expected, actual);
+            System.exit(1);
         }
     }
 
     public static void equalsBool(bool expected, bool actual) {
         if (expected != actual) {
-            printf("Assertion failed: boolean values differ\n");
-            exit(1);
+            System.printf("Assertion failed: boolean values differ\n");
+            System.exit(1);
         }
     }
 
     public static void notNull(String value) {
         if (value == null) {
-            printf("Assertion failed: value is null\n");
-            exit(1);
+            System.printf("Assertion failed: value is null\n");
+            System.exit(1);
         }
     }
 }

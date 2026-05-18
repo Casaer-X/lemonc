@@ -5,58 +5,58 @@ package examples;
 
 public class IOExample {
     public static void main(String[] args) {
-        printf("=== 输入输出示例 ===\n\n");
+        System.printf("=== 输入输出示例 ===\n\n");
 
         // 1. 基本打印
-        printf("1. 基本打印:\n");
-        printf("   Hello, World!\n");
-        printf("   Welcome to Lemon language!\n\n");
+        System.printf("1. 基本打印:\n");
+        System.printf("   Hello, World!\n");
+        System.printf("   Welcome to Lemon language!\n\n");
 
         // 2. 格式化输出
-        printf("2. 格式化输出:\n");
-        printf("   整数: %d\n", 42);
-        printf("   字符串: %s\n", "Lemon");
-        printf("   混合: %s = %d\n\n", "答案", 42);
+        System.printf("2. 格式化输出:\n");
+        System.printf("   整数: %d\n", 42);
+        System.printf("   字符串: %s\n", "Lemon");
+        System.printf("   混合: %s = %d\n\n", "答案", 42);
 
         // 3. 打印各种类型
-        printf("3. 打印各种类型:\n");
+        System.printf("3. 打印各种类型:\n");
         int num = 123;
         bool flag = true;
-        printf("   整数变量: %d\n", num);
-        printf("   布尔变量: %d\n", flag);
-        printf("   字符常量: %c\n", 'A');
-        printf("   字符串常量: %s\n\n", "Hello");
+        System.printf("   整数变量: %d\n", num);
+        System.printf("   布尔变量: %d\n", flag);
+        System.printf("   字符常量: %c\n", 'A');
+        System.printf("   字符串常量: %s\n\n", "Hello");
 
         // 4. 多行输出
-        printf("4. 多行输出:\n");
-        printf("   第一行\n");
-        printf("   第二行\n");
-        printf("   第三行\n\n");
+        System.printf("4. 多行输出:\n");
+        System.printf("   第一行\n");
+        System.printf("   第二行\n");
+        System.printf("   第三行\n\n");
 
         // 5. 输出表格
-        printf("5. 输出表格:\n");
-        printf("   +------+-------+\n");
-        printf("   | Name | Value |\n");
-        printf("   +------+-------+\n");
-        printf("   |  A   |   10  |\n");
-        printf("   |  B   |   20  |\n");
-        printf("   |  C   |   30  |\n");
-        printf("   +------+-------+\n\n");
+        System.printf("5. 输出表格:\n");
+        System.printf("   +------+-------+\n");
+        System.printf("   | Name | Value |\n");
+        System.printf("   +------+-------+\n");
+        System.printf("   |  A   |   10  |\n");
+        System.printf("   |  B   |   20  |\n");
+        System.printf("   |  C   |   30  |\n");
+        System.printf("   +------+-------+\n\n");
 
         // 6. 打印 ASCII 艺术
-        printf("6. ASCII 艺术:\n");
-        printf("     *\n");
-        printf("    ***\n");
-        printf("   *****\n");
-        printf("  *******\n");
-        printf(" *********\n");
-        printf("    | |\n\n");
+        System.printf("6. ASCII 艺术:\n");
+        System.printf("     *\n");
+        System.printf("    ***\n");
+        System.printf("   *****\n");
+        System.printf("  *******\n");
+        System.printf(" *********\n");
+        System.printf("    | |\n\n");
 
         // 7. 使用内置函数
-        printf("7. 内置函数:\n");
-        printf("   strlen(\"Hello\") = %d\n", strlen("Hello"));
-        printf("   strcmp(\"abc\", \"abc\") = %d\n\n", strcmp("abc", "abc"));
+        System.printf("7. 内置函数:\n");
+        System.printf("   System.strlen(\"Hello\") = %d\n", System.strlen("Hello"));
+        System.printf("   System.strcmp(\"abc\", \"abc\") = %d\n\n", System.strcmp("abc", "abc"));
 
-        printf("=== 示例结束 ===\n");
+        System.printf("=== 示例结束 ===\n");
     }
 }

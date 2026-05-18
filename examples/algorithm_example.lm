@@ -5,7 +5,7 @@ package examples;
 
 public class AlgorithmExample {
     public static void main(String[] args) {
-        printf("=== 数组与算法示例 ===\n\n");
+        System.printf("=== 数组与算法示例 ===\n\n");
 
         Array<int> arr = new Array();
         arr.add(64);
@@ -16,60 +16,60 @@ public class AlgorithmExample {
         arr.add(11);
         arr.add(90);
 
-        printf("原始数组: ");
+        System.printf("原始数组: ");
         AlgorithmExample.printArray(arr);
 
         // 1. 冒泡排序
-        printf("\n1. 冒泡排序:\n");
+        System.printf("\n1. 冒泡排序:\n");
         Array<int> bubbleArr = AlgorithmExample.copyArray(arr);
         AlgorithmExample.bubbleSort(bubbleArr);
-        printf("   结果: ");
+        System.printf("   结果: ");
         AlgorithmExample.printArray(bubbleArr);
 
         // 2. 选择排序
-        printf("\n2. 选择排序:\n");
+        System.printf("\n2. 选择排序:\n");
         Array<int> selectArr = AlgorithmExample.copyArray(arr);
         AlgorithmExample.selectionSort(selectArr);
-        printf("   结果: ");
+        System.printf("   结果: ");
         AlgorithmExample.printArray(selectArr);
 
         // 3. 插入排序
-        printf("\n3. 插入排序:\n");
+        System.printf("\n3. 插入排序:\n");
         Array<int> insertArr = AlgorithmExample.copyArray(arr);
         AlgorithmExample.insertionSort(insertArr);
-        printf("   结果: ");
+        System.printf("   结果: ");
         AlgorithmExample.printArray(insertArr);
 
         // 4. 线性查找
-        printf("\n4. 线性查找:\n");
+        System.printf("\n4. 线性查找:\n");
         int target = 22;
         int index = AlgorithmExample.linearSearch(arr, target);
-        printf("   查找 %d: 索引 = %d\n", target, index);
+        System.printf("   查找 %d: 索引 = %d\n", target, index);
         int notFound = AlgorithmExample.linearSearch(arr, 999);
-        printf("   查找 999: 索引 = %d (未找到)\n", notFound);
+        System.printf("   查找 999: 索引 = %d (未找到)\n", notFound);
 
         // 5. 二分查找
-        printf("\n5. 二分查找:\n");
+        System.printf("\n5. 二分查找:\n");
         Array<int> sortedArr = AlgorithmExample.copyArray(arr);
         AlgorithmExample.bubbleSort(sortedArr);
-        printf("   排序后数组: ");
+        System.printf("   排序后数组: ");
         AlgorithmExample.printArray(sortedArr);
         int binIndex = AlgorithmExample.binarySearch(sortedArr, 25);
-        printf("   查找 25: 索引 = %d\n", binIndex);
+        System.printf("   查找 25: 索引 = %d\n", binIndex);
 
         // 6. 数组统计
-        printf("\n6. 数组统计:\n");
-        printf("   大小 = %d\n", arr.size());
-        printf("   最大值 = %d\n", AlgorithmExample.maxArray(arr));
-        printf("   最小值 = %d\n", AlgorithmExample.minArray(arr));
-        printf("   求和 = %d\n", AlgorithmExample.sumArray(arr));
-        printf("   平均值 = %d\n", AlgorithmExample.avgArray(arr));
+        System.printf("\n6. 数组统计:\n");
+        System.printf("   大小 = %d\n", arr.size());
+        System.printf("   最大值 = %d\n", AlgorithmExample.maxArray(arr));
+        System.printf("   最小值 = %d\n", AlgorithmExample.minArray(arr));
+        System.printf("   求和 = %d\n", AlgorithmExample.sumArray(arr));
+        System.printf("   平均值 = %d\n", AlgorithmExample.avgArray(arr));
 
         // 7. 数组操作
-        printf("\n7. 数组操作:\n");
+        System.printf("\n7. 数组操作:\n");
         Array<int> revArr = AlgorithmExample.copyArray(arr);
         AlgorithmExample.reverseArray(revArr);
-        printf("   反转: ");
+        System.printf("   反转: ");
         AlgorithmExample.printArray(revArr);
 
         Array<int> fillArr = new Array();
@@ -79,17 +79,17 @@ public class AlgorithmExample {
         fillArr.add(0);
         fillArr.add(0);
         AlgorithmExample.fillArray(fillArr, 42);
-        printf("   填充 42: ");
+        System.printf("   填充 42: ");
         AlgorithmExample.printArray(fillArr);
 
         // 8. 查找与计数
-        printf("\n8. 查找与计数:\n");
-        printf("   包含 22: %d\n", AlgorithmExample.contains(arr, 22));
-        printf("   包含 999: %d\n", AlgorithmExample.contains(arr, 999));
-        printf("   22 出现次数: %d\n", AlgorithmExample.count(arr, 22));
+        System.printf("\n8. 查找与计数:\n");
+        System.printf("   包含 22: %d\n", AlgorithmExample.contains(arr, 22));
+        System.printf("   包含 999: %d\n", AlgorithmExample.contains(arr, 999));
+        System.printf("   22 出现次数: %d\n", AlgorithmExample.count(arr, 22));
 
         // 9. 去重
-        printf("\n9. 去重:\n");
+        System.printf("\n9. 去重:\n");
         Array<int> dupArr = new Array();
         dupArr.add(1);
         dupArr.add(2);
@@ -97,25 +97,25 @@ public class AlgorithmExample {
         dupArr.add(3);
         dupArr.add(3);
         dupArr.add(3);
-        printf("   原始: ");
+        System.printf("   原始: ");
         AlgorithmExample.printArray(dupArr);
         Array<int> uniqueArr = AlgorithmExample.unique(dupArr);
-        printf("   去重: ");
+        System.printf("   去重: ");
         AlgorithmExample.printArray(uniqueArr);
 
-        printf("\n=== 示例结束 ===\n");
+        System.printf("\n=== 示例结束 ===\n");
     }
 
     public static void printArray(Array<int> arr) {
         int n = arr.size();
-        printf("[");
+        System.printf("[");
         for (int i = 0; i < n; i++) {
-            printf("%d", arr.get(i));
+            System.printf("%d", arr.get(i));
             if (i < n - 1) {
-                printf(", ");
+                System.printf(", ");
             }
         }
-        printf("]\n");
+        System.printf("]\n");
     }
 
     public static Array<int> copyArray(Array<int> arr) {

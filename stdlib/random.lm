@@ -7,7 +7,7 @@ public class Random {
     private int seed;
 
     public Random() {
-        this.seed = clock();
+        this.seed = System.clock();
         if (this.seed == 0) {
             this.seed = 12345;
         }
@@ -60,11 +60,11 @@ public class Random {
 
 public class RandomUtils {
     public static void seed(int seed) {
-        srand(seed);
+        System.srand(seed);
     }
 
     public static int randomInt() {
-        int value = rand();
+        int value = System.rand();
         if (value < 0) return -value;
         return value;
     }

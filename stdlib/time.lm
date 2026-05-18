@@ -7,20 +7,20 @@ public class Time {
     public static final int CLOCKS_PER_SEC = 1000;
 
     public static int ticks() {
-        return clock();
+        return System.clock();
     }
 
     public static int nowSeconds() {
-        return time(0);
+        return System.time(0);
     }
 
     public static double elapsedSeconds(int startTicks) {
-        int current = clock();
+        int current = System.clock();
         return (double)(current - startTicks) / 1000.0;
     }
 
     public static int elapsedMillis(int startTicks) {
-        return clock() - startTicks;
+        return System.clock() - startTicks;
     }
 }
 
@@ -36,18 +36,18 @@ public class Timer {
     }
 
     public void start() {
-        this.startTicks = clock();
+        this.startTicks = System.clock();
         this.stopTicks = this.startTicks;
         this.running = true;
     }
 
     public void stop() {
-        this.stopTicks = clock();
+        this.stopTicks = System.clock();
         this.running = false;
     }
 
     public void reset() {
-        this.startTicks = clock();
+        this.startTicks = System.clock();
         this.stopTicks = this.startTicks;
     }
 
@@ -57,7 +57,7 @@ public class Timer {
 
     public int elapsedMillis() {
         if (this.running) {
-            return clock() - this.startTicks;
+            return System.clock() - this.startTicks;
         }
         return this.stopTicks - this.startTicks;
     }

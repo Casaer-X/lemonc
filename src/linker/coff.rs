@@ -5,6 +5,7 @@ pub struct CoffFile {
     pub symbols: Vec<CoffSymbol>,
     pub string_table: Vec<u8>,
     pub relocations: HashMap<u16, Vec<CoffReloc>>,
+    pub raw_to_symbol_idx: HashMap<u32, usize>,
 }
 
 pub struct CoffSection {
@@ -103,6 +104,7 @@ impl CoffFile {
 
         let sym_table_ptr = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
         let mut symbols = Vec::new();
+        let mut raw_to_symbol_idx: HashMap<u32, usize> = HashMap::new();
         let mut sym_offset = sym_table_ptr;
 
         let string_table_start = sym_table_ptr + num_symbols * 18;
@@ -123,6 +125,7 @@ impl CoffFile {
             vec![0, 0, 0, 4]
         };
 
+        let mut raw_sym_idx: u32 = 0;
         for _ in 0..num_symbols {
             if sym_offset as usize + 18 > data.len() {
                 break;
@@ -150,6 +153,12 @@ impl CoffFile {
             let storage_class = sym_data[16];
             let num_aux = sym_data[17];
 
+            let parsed_idx = symbols.len();
+            raw_to_symbol_idx.insert(raw_sym_idx, parsed_idx);
+            for aux_i in 1..=(num_aux as u32) {
+                raw_to_symbol_idx.insert(raw_sym_idx + aux_i, parsed_idx);
+            }
+
             symbols.push(CoffSymbol {
                 name,
                 value,
@@ -159,6 +168,7 @@ impl CoffFile {
                 num_aux,
             });
 
+            raw_sym_idx += 1 + num_aux as u32;
             sym_offset += 18;
             for _ in 0..num_aux {
                 sym_offset += 18;
@@ -196,6 +206,7 @@ impl CoffFile {
             symbols,
             string_table,
             relocations,
+            raw_to_symbol_idx,
         })
     }
 

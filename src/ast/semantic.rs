@@ -676,10 +676,13 @@ impl SemanticAnalyzer {
                     self.check_block(default_block);
                 }
             }
-            Stmt::ForEach(elem_type, _name, iterable, body) => {
+            Stmt::ForEach(elem_type, name, iterable, body) => {
                 self.check_type_ref(elem_type);
                 self.check_expr(iterable);
+                self.push_scope();
+                self.define_var(name.clone(), elem_type.clone());
                 self.check_stmt(body);
+                self.pop_scope();
             }
         }
     }
@@ -723,6 +726,12 @@ impl SemanticAnalyzer {
                     if self.is_builtin_func(name) {
                         for arg in args {
                             self.check_expr(arg);
+                        }
+                        if self.is_system_method(name) {
+                            self.warnings.push(format!(
+                                "Bare function call '{}' - consider using 'System.{}()' instead",
+                                name, name
+                            ));
                         }
                         return;
                     }
@@ -968,6 +977,7 @@ impl SemanticAnalyzer {
             name,
             "int" | "long" | "float" | "double" | "bool" | "void" | "byte" | "char" | "short" | "String" | "TypeInfo" | "Array" | "Map"
             | "List" | "Pair" | "Optional" | "Result" | "Set" | "Queue" | "Stack" | "HashMap" | "HashSet" | "LinkedList" | "Tuple"
+            | "System" | "StringBuilder" | "Character"
         ) || self.enums.contains_key(name)
     }
 
@@ -986,13 +996,55 @@ impl SemanticAnalyzer {
         )
     }
 
+    fn is_system_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "printf" | "fprintf" | "sprintf" | "snprintf" | "vsnprintf"
+            | "malloc" | "free" | "realloc" | "calloc"
+            | "exit" | "abort"
+            | "memcpy" | "memset" | "memmove"
+            | "strlen" | "strcmp" | "strncmp" | "strdup" | "strstr"
+            | "fopen" | "fclose" | "fread" | "fwrite" | "fseek" | "ftell" | "fgets" | "fputs" | "fputc" | "fgetc" | "ungetc" | "feof" | "ferror" | "fflush"
+            | "scanf" | "sscanf" | "getchar" | "putchar"
+            | "rand" | "srand" | "time" | "clock"
+            | "sin" | "cos" | "tan" | "sqrt" | "pow" | "log" | "log10" | "exp" | "fabs" | "ceil" | "floor" | "round" | "fmod"
+            | "system" | "getenv" | "getpid" | "getppid"
+            | "gc_init" | "gc_mark" | "gc_sweep" | "gc_alloc" | "type_of"
+        )
+    }
+
     fn is_builtin_type_method(&self, type_name: &str, method_name: &str) -> bool {
         match type_name {
+            "System" => matches!(
+                method_name,
+                "printf" | "fprintf" | "sprintf" | "snprintf" | "vsnprintf"
+                | "malloc" | "free" | "realloc" | "calloc"
+                | "exit" | "abort"
+                | "memcpy" | "memset" | "memmove"
+                | "strlen" | "strcmp" | "strncmp" | "strdup" | "strstr"
+                | "fopen" | "fclose" | "fread" | "fwrite" | "fseek" | "ftell" | "fgets" | "fputs" | "fputc" | "fgetc" | "ungetc" | "feof" | "ferror" | "fflush"
+                | "scanf" | "sscanf" | "getchar" | "putchar"
+                | "rand" | "srand" | "time" | "clock"
+                | "sin" | "cos" | "tan" | "sqrt" | "pow" | "log" | "log10" | "exp" | "fabs" | "ceil" | "floor" | "round" | "fmod"
+                | "system" | "getenv" | "getpid" | "getppid"
+                | "gc_init" | "gc_mark" | "gc_sweep" | "gc_alloc" | "type_of"
+            ),
             "String" => matches!(
                 method_name,
                 "length" | "charAt" | "substring" | "indexOf" | "lastIndexOf" | "contains" | "startsWith" | "endsWith"
-                | "trim" | "toLowerCase" | "toUpperCase" | "replace" | "split" | "toInt" | "toDouble" | "equals" | "compareTo"
-                | "concat" | "isEmpty" | "intToString"
+                | "trim" | "toLowerCase" | "toUpperCase" | "replace" | "split" | "toInt" | "toDouble" | "toLong" | "toFloat" | "equals" | "compareTo"
+                | "concat" | "isEmpty" | "intToString" | "longToString" | "doubleToString" | "fromChar" | "fromCharArray"
+                | "toCharArray" | "toString"
+            ),
+            "Character" => matches!(
+                method_name,
+                "isDigit" | "isAlpha" | "isAlphaNumeric" | "isWhitespace" | "isUpper" | "isLower"
+                | "toUpperCase" | "toLowerCase" | "toInt" | "fromInt"
+            ),
+            "StringBuilder" => matches!(
+                method_name,
+                "append" | "appendChar" | "appendInt" | "appendLong" | "appendDouble" | "appendBool"
+                | "toString" | "length" | "clear" | "capacity"
             ),
             "Array" => matches!(
                 method_name,
