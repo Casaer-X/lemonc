@@ -6,3 +6,4 @@ pub mod codegen;
 pub mod jit;
 pub mod diagnostics;
 pub mod build_system;
+pub mod linker;

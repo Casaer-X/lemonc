@@ -6,6 +6,7 @@ mod codegen;
 mod jit;
 mod diagnostics;
 mod build_system;
+mod linker;
 
 use lexer::lexer::Lexer;
 use parser::parser::Parser;
@@ -541,6 +542,45 @@ fn get_compiler_version(path: &str, name: &str) -> Option<String> {
 fn link_native_exe(obj_path: &str, exe_path: &str, os: &OsInfo, keep: bool) {
     println!("\n[6/6] Linking native executable...");
 
+    if os.name == "windows" {
+        if let Ok(obj_data) = fs::read(obj_path) {
+            let mut pe_linker = linker::PeLinker::new();
+            match pe_linker.add_object(&obj_data) {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("  Built-in linker parse error: {}, trying external linker...", e);
+                    link_native_exe_external(obj_path, exe_path, os, keep);
+                    return;
+                }
+            }
+
+            match pe_linker.build_pe() {
+                Ok(pe_data) => {
+                    match fs::write(exe_path, &pe_data) {
+                        Ok(_) => {
+                            println!("  Linked with built-in PE linker");
+                            println!("  Executable written to: {}", exe_path);
+                            if !keep {
+                                let _ = fs::remove_file(obj_path);
+                            }
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("  Built-in linker write error: {}, trying external linker...", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  Built-in linker error: {}, trying external linker...", e);
+                }
+            }
+        }
+    }
+
+    link_native_exe_external(obj_path, exe_path, os, keep);
+}
+
+fn link_native_exe_external(obj_path: &str, exe_path: &str, os: &OsInfo, keep: bool) {
     let linker = find_linker(os);
     let mut cmd = Command::new(&linker);
 
