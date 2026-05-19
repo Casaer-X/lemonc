@@ -155,7 +155,7 @@ class Lexer {
             return this.readNumber(startPos, startLine, startCol);
         }
 
-        if (Character.isAlpha(c)) {
+        if (Character.isAlpha(c) || c == '_') {
             return this.readIdentifier(startPos, startLine, startCol);
         }
 
@@ -317,7 +317,7 @@ class Lexer {
     private Token readIdentifier(int startPos, int startLine, int startCol) {
         while (true) {
             char c = this.peekChar();
-            if (Character.isAlphaNumeric(c)) {
+            if (Character.isAlphaNumeric(c) || c == '_') {
                 this.advance();
             } else {
                 break;

@@ -1,0 +1,1264 @@
+package lemon.parser;
+
+// ============================================================
+// Lemon Language AST 节点定义
+// 基于 lemonc/src/ast/node.rs 的 Rust 定义
+// 使用 class + static int 常量模式（与 TokenKind.lm 相同）
+// ============================================================
+
+// ============================================================
+// 枚举常量类
+// ============================================================
+
+class PrimitiveType {
+    public static int Void = 0;
+    public static int Bool = 1;
+    public static int Byte = 2;
+    public static int Char = 3;
+    public static int Short = 4;
+    public static int Int = 5;
+    public static int Long = 6;
+    public static int Float = 7;
+    public static int Double = 8;
+
+    public static String toString(int kind) {
+        if (kind == PrimitiveType.Void) return "void";
+        if (kind == PrimitiveType.Bool) return "bool";
+        if (kind == PrimitiveType.Byte) return "byte";
+        if (kind == PrimitiveType.Char) return "char";
+        if (kind == PrimitiveType.Short) return "short";
+        if (kind == PrimitiveType.Int) return "int";
+        if (kind == PrimitiveType.Long) return "long";
+        if (kind == PrimitiveType.Float) return "float";
+        if (kind == PrimitiveType.Double) return "double";
+        return "unknown";
+    }
+}
+
+class BinaryOp {
+    public static int Add = 0;
+    public static int Sub = 1;
+    public static int Mul = 2;
+    public static int Div = 3;
+    public static int Mod = 4;
+    public static int And = 5;
+    public static int Or = 6;
+    public static int BitAnd = 7;
+    public static int BitOr = 8;
+    public static int BitXor = 9;
+    public static int Shl = 10;
+    public static int Shr = 11;
+    public static int Eq = 12;
+    public static int Ne = 13;
+    public static int Lt = 14;
+    public static int Gt = 15;
+    public static int Le = 16;
+    public static int Ge = 17;
+
+    public static String toString(int op) {
+        if (op == BinaryOp.Add) return "+";
+        if (op == BinaryOp.Sub) return "-";
+        if (op == BinaryOp.Mul) return "*";
+        if (op == BinaryOp.Div) return "/";
+        if (op == BinaryOp.Mod) return "%";
+        if (op == BinaryOp.And) return "&&";
+        if (op == BinaryOp.Or) return "||";
+        if (op == BinaryOp.BitAnd) return "&";
+        if (op == BinaryOp.BitOr) return "|";
+        if (op == BinaryOp.BitXor) return "^";
+        if (op == BinaryOp.Shl) return "<<";
+        if (op == BinaryOp.Shr) return ">>";
+        if (op == BinaryOp.Eq) return "==";
+        if (op == BinaryOp.Ne) return "!=";
+        if (op == BinaryOp.Lt) return "<";
+        if (op == BinaryOp.Gt) return ">";
+        if (op == BinaryOp.Le) return "<=";
+        if (op == BinaryOp.Ge) return ">=";
+        return "?";
+    }
+}
+
+class UnaryOp {
+    public static int Plus = 0;
+    public static int Minus = 1;
+    public static int Not = 2;
+    public static int BitNot = 3;
+    public static int Deref = 4;
+    public static int AddressOf = 5;
+    public static int PreInc = 6;
+    public static int PreDec = 7;
+    public static int PostInc = 8;
+    public static int PostDec = 9;
+
+    public static String toString(int op) {
+        if (op == UnaryOp.Plus) return "+";
+        if (op == UnaryOp.Minus) return "-";
+        if (op == UnaryOp.Not) return "!";
+        if (op == UnaryOp.BitNot) return "~";
+        if (op == UnaryOp.Deref) return "*";
+        if (op == UnaryOp.AddressOf) return "&";
+        if (op == UnaryOp.PreInc) return "++";
+        if (op == UnaryOp.PreDec) return "--";
+        if (op == UnaryOp.PostInc) return "++";
+        if (op == UnaryOp.PostDec) return "--";
+        return "?";
+    }
+}
+
+class ClassModifier {
+    public static int Public = 0;
+    public static int Private = 1;
+    public static int Abstract = 2;
+    public static int Final = 3;
+    public static int Reflectable = 4;
+
+    public static String toString(int m) {
+        if (m == ClassModifier.Public) return "public";
+        if (m == ClassModifier.Private) return "private";
+        if (m == ClassModifier.Abstract) return "abstract";
+        if (m == ClassModifier.Final) return "final";
+        if (m == ClassModifier.Reflectable) return "reflectable";
+        return "";
+    }
+}
+
+class MethodModifier {
+    public static int Public = 0;
+    public static int Private = 1;
+    public static int Static = 2;
+    public static int Virtual = 3;
+    public static int Override = 4;
+    public static int Final = 5;
+    public static int Abstract = 6;
+
+    public static String toString(int m) {
+        if (m == MethodModifier.Public) return "public";
+        if (m == MethodModifier.Private) return "private";
+        if (m == MethodModifier.Static) return "static";
+        if (m == MethodModifier.Virtual) return "virtual";
+        if (m == MethodModifier.Override) return "override";
+        if (m == MethodModifier.Final) return "final";
+        if (m == MethodModifier.Abstract) return "abstract";
+        return "";
+    }
+}
+
+class VarModifier {
+    public static int Public = 0;
+    public static int Private = 1;
+    public static int Static = 2;
+    public static int Final = 3;
+    public static int Virtual = 4;
+    public static int Override = 5;
+    public static int Abstract = 6;
+
+    public static String toString(int m) {
+        if (m == VarModifier.Public) return "public";
+        if (m == VarModifier.Private) return "private";
+        if (m == VarModifier.Static) return "static";
+        if (m == VarModifier.Final) return "final";
+        if (m == VarModifier.Virtual) return "virtual";
+        if (m == VarModifier.Override) return "override";
+        if (m == VarModifier.Abstract) return "abstract";
+        return "";
+    }
+}
+
+// ============================================================
+// Kind 常量类（用于带变体的 class）
+// ============================================================
+
+class TypeRefKind {
+    public static int Primitive = 0;
+    public static int Named = 1;
+    public static int Array = 2;
+    public static int FunctionPtr = 3;
+}
+
+class DeclKind {
+    public static int Class = 0;
+    public static int Interface = 1;
+    public static int Enum = 2;
+    public static int Function = 3;
+    public static int Variable = 4;
+    public static int Import = 5;
+    public static int Package = 6;
+}
+
+class ClassMemberKind {
+    public static int Field = 0;
+    public static int Method = 1;
+    public static int Constructor = 2;
+    public static int Destructor = 3;
+}
+
+class InterfaceMemberKind {
+    public static int MethodSignature = 0;
+    public static int Field = 1;
+}
+
+class StmtKind {
+    public static int Block = 0;
+    public static int Expr = 1;
+    public static int If = 2;
+    public static int For = 3;
+    public static int ForEach = 4;
+    public static int While = 5;
+    public static int Return = 6;
+    public static int Break = 7;
+    public static int Continue = 8;
+    public static int Try = 9;
+    public static int VarDecl = 10;
+    public static int Switch = 11;
+}
+
+class ExprKind {
+    public static int IntegerLiteral = 0;
+    public static int FloatLiteral = 1;
+    public static int StringLiteral = 2;
+    public static int CharLiteral = 3;
+    public static int BoolLiteral = 4;
+    public static int Null = 5;
+    public static int This = 6;
+    public static int Super = 7;
+    public static int Variable = 8;
+    public static int BinaryOp = 9;
+    public static int UnaryOp = 10;
+    public static int Assignment = 11;
+    public static int Call = 12;
+    public static int MethodCall = 13;
+    public static int FieldAccess = 14;
+    public static int ArrayAccess = 15;
+    public static int New = 16;
+    public static int Delete = 17;
+    public static int Cast = 18;
+    public static int InstanceOf = 19;
+    public static int Sizeof = 20;
+    public static int TypeId = 21;
+    public static int Lambda = 22;
+    public static int Ternary = 23;
+    public static int Throw = 24;
+    public static int Match = 25;
+}
+
+class MatchPatternKind {
+    public static int Variant = 0;
+    public static int Wildcard = 1;
+    public static int Literal = 2;
+    public static int Or = 3;
+}
+
+class MatchBodyKind {
+    public static int Expr = 0;
+    public static int Block = 1;
+}
+
+class LambdaBodyKind {
+    public static int Expr = 0;
+    public static int Block = 1;
+}
+
+// ============================================================
+// 基础节点类
+// ============================================================
+
+// 类型引用：Primitive | Named(name, typeArgs) | Array(elementType) | FunctionPtr(returnType, paramTypes)
+class TypeRef {
+    public int kind;
+    public int primitiveKind;          // Primitive: PrimitiveType 值
+    public String name;                // Named: 类型名
+    public Array<TypeRef> typeArgs;    // Named: 类型参数
+    public TypeRef elementType;        // Array: 元素类型
+    public TypeRef returnType;         // FunctionPtr: 返回类型
+    public Array<TypeRef> paramTypes;  // FunctionPtr: 参数类型列表
+
+    public TypeRef(int k) {
+        this.kind = k;
+        this.primitiveKind = 0;
+        this.name = "";
+        this.typeArgs = null;
+        this.elementType = null;
+        this.returnType = null;
+        this.paramTypes = null;
+    }
+
+    public static TypeRef makePrimitive(int primKind) {
+        TypeRef t = new TypeRef(TypeRefKind.Primitive);
+        t.primitiveKind = primKind;
+        return t;
+    }
+
+    public static TypeRef makeNamed(String name, Array<TypeRef> typeArgs) {
+        TypeRef t = new TypeRef(TypeRefKind.Named);
+        t.name = name;
+        t.typeArgs = typeArgs;
+        return t;
+    }
+
+    public static TypeRef makeArray(TypeRef elementType) {
+        TypeRef t = new TypeRef(TypeRefKind.Array);
+        t.elementType = elementType;
+        return t;
+    }
+
+    public static TypeRef makeFunctionPtr(TypeRef returnType, Array<TypeRef> paramTypes) {
+        TypeRef t = new TypeRef(TypeRefKind.FunctionPtr);
+        t.returnType = returnType;
+        t.paramTypes = paramTypes;
+        return t;
+    }
+
+    public String toString() {
+        if (this.kind == TypeRefKind.Primitive) {
+            return PrimitiveType.toString(this.primitiveKind);
+        }
+        if (this.kind == TypeRefKind.Named) {
+            return this.name;
+        }
+        if (this.kind == TypeRefKind.Array) {
+            return this.elementType.toString() + "[]";
+        }
+        if (this.kind == TypeRefKind.FunctionPtr) {
+            return "fn(" + this.returnType.toString() + ")";
+        }
+        return "TypeRef?";
+    }
+}
+
+// 函数参数
+class Param {
+    public TypeRef paramType;
+    public String name;
+    public Expr defaultValue;  // null 表示无默认值
+
+    public Param(TypeRef paramType, String name, Expr defaultValue) {
+        this.paramType = paramType;
+        this.name = name;
+        this.defaultValue = defaultValue;
+    }
+
+    public static Param of(TypeRef paramType, String name) {
+        return new Param(paramType, name, null);
+    }
+}
+
+// 类型参数
+class TypeParam {
+    public String name;
+    public TypeRef bound;  // null 表示无约束
+
+    public TypeParam(String name, TypeRef bound) {
+        this.name = name;
+        this.bound = bound;
+    }
+
+    public static TypeParam of(String name) {
+        return new TypeParam(name, null);
+    }
+}
+
+// ============================================================
+// 声明节点
+// ============================================================
+
+// 声明：Class | Interface | Enum | Function | Variable | Import | Package
+class Declaration {
+    public int kind;
+    public ClassDecl classDecl;
+    public InterfaceDecl interfaceDecl;
+    public EnumDecl enumDecl;
+    public FunctionDecl functionDecl;
+    public VarDecl varDecl;
+    public ImportDecl importDecl;
+    public PackageDecl packageDecl;
+
+    public Declaration(int k) {
+        this.kind = k;
+        this.classDecl = null;
+        this.interfaceDecl = null;
+        this.enumDecl = null;
+        this.functionDecl = null;
+        this.varDecl = null;
+        this.importDecl = null;
+        this.packageDecl = null;
+    }
+
+    public static Declaration makeClass(ClassDecl decl) {
+        Declaration d = new Declaration(DeclKind.Class);
+        d.classDecl = decl;
+        return d;
+    }
+
+    public static Declaration makeInterface(InterfaceDecl decl) {
+        Declaration d = new Declaration(DeclKind.Interface);
+        d.interfaceDecl = decl;
+        return d;
+    }
+
+    public static Declaration makeEnum(EnumDecl decl) {
+        Declaration d = new Declaration(DeclKind.Enum);
+        d.enumDecl = decl;
+        return d;
+    }
+
+    public static Declaration makeFunction(FunctionDecl decl) {
+        Declaration d = new Declaration(DeclKind.Function);
+        d.functionDecl = decl;
+        return d;
+    }
+
+    public static Declaration makeVariable(VarDecl decl) {
+        Declaration d = new Declaration(DeclKind.Variable);
+        d.varDecl = decl;
+        return d;
+    }
+
+    public static Declaration makeImport(ImportDecl decl) {
+        Declaration d = new Declaration(DeclKind.Import);
+        d.importDecl = decl;
+        return d;
+    }
+
+    public static Declaration makePackage(PackageDecl decl) {
+        Declaration d = new Declaration(DeclKind.Package);
+        d.packageDecl = decl;
+        return d;
+    }
+}
+
+// 类声明
+class ClassDecl {
+    public String name;
+    public Array<int> modifiers;       // ClassModifier 值的数组
+    public Array<TypeParam> typeParams;
+    public TypeRef extends_;           // null 表示无父类
+    public Array<TypeRef> implements_; // 实现的接口列表
+    public Array<ClassMember> members;
+
+    public ClassDecl(String name, Array<int> modifiers, Array<TypeParam> typeParams,
+                     TypeRef extends_, Array<TypeRef> implements_, Array<ClassMember> members) {
+        this.name = name;
+        this.modifiers = modifiers;
+        this.typeParams = typeParams;
+        this.extends_ = extends_;
+        this.implements_ = implements_;
+        this.members = members;
+    }
+}
+
+// 接口声明
+class InterfaceDecl {
+    public String name;
+    public Array<TypeParam> typeParams;
+    public Array<TypeRef> extends_;    // 继承的接口列表
+    public Array<InterfaceMember> members;
+
+    public InterfaceDecl(String name, Array<TypeParam> typeParams,
+                         Array<TypeRef> extends_, Array<InterfaceMember> members) {
+        this.name = name;
+        this.typeParams = typeParams;
+        this.extends_ = extends_;
+        this.members = members;
+    }
+}
+
+// 枚举声明
+class EnumDecl {
+    public String name;
+    public Array<TypeParam> typeParams;
+    public Array<EnumVariant> variants;
+    public Array<int> modifiers;       // ClassModifier 值的数组
+
+    public EnumDecl(String name, Array<TypeParam> typeParams,
+                    Array<EnumVariant> variants, Array<int> modifiers) {
+        this.name = name;
+        this.typeParams = typeParams;
+        this.variants = variants;
+        this.modifiers = modifiers;
+    }
+}
+
+// 枚举变体
+class EnumVariant {
+    public String name;
+    public Array<EnumVariantField> fields;
+
+    public EnumVariant(String name, Array<EnumVariantField> fields) {
+        this.name = name;
+        this.fields = fields;
+    }
+}
+
+// 枚举变体字段
+class EnumVariantField {
+    public TypeRef fieldType;
+    public String name;  // null 表示未命名字段
+
+    public EnumVariantField(TypeRef fieldType, String name) {
+        this.fieldType = fieldType;
+        this.name = name;
+    }
+
+    public static EnumVariantField unnamed(TypeRef fieldType) {
+        return new EnumVariantField(fieldType, null);
+    }
+}
+
+// 函数声明
+class FunctionDecl {
+    public TypeRef returnType;
+    public String name;
+    public Array<Param> params;
+    public Block body;
+    public Array<int> modifiers;       // MethodModifier 值的数组
+
+    public FunctionDecl(TypeRef returnType, String name, Array<Param> params,
+                        Block body, Array<int> modifiers) {
+        this.returnType = returnType;
+        this.name = name;
+        this.params = params;
+        this.body = body;
+        this.modifiers = modifiers;
+    }
+}
+
+// 变量声明
+class VarDecl {
+    public TypeRef varType;
+    public String name;
+    public Expr initializer;           // null 表示无初始化器
+    public Array<int> modifiers;       // VarModifier 值的数组
+
+    public VarDecl(TypeRef varType, String name, Expr initializer, Array<int> modifiers) {
+        this.varType = varType;
+        this.name = name;
+        this.initializer = initializer;
+        this.modifiers = modifiers;
+    }
+
+    public static VarDecl of(TypeRef varType, String name) {
+        return new VarDecl(varType, name, null, null);
+    }
+}
+
+// 导入声明
+class ImportDecl {
+    public String path;
+    public String alias;  // null 表示无别名
+
+    public ImportDecl(String path, String alias) {
+        this.path = path;
+        this.alias = alias;
+    }
+
+    public static ImportDecl of(String path) {
+        return new ImportDecl(path, null);
+    }
+}
+
+// 包声明
+class PackageDecl {
+    public String name;
+
+    public PackageDecl(String name) {
+        this.name = name;
+    }
+}
+
+// ============================================================
+// 类成员节点
+// ============================================================
+
+// 类成员：Field | Method | Constructor | Destructor
+class ClassMember {
+    public int kind;
+    public VarDecl field;
+    public MethodDecl method;
+    public ConstructorDecl constructor;
+    public DestructorDecl destructor;
+
+    public ClassMember(int k) {
+        this.kind = k;
+        this.field = null;
+        this.method = null;
+        this.constructor = null;
+        this.destructor = null;
+    }
+
+    public static ClassMember makeField(VarDecl decl) {
+        ClassMember m = new ClassMember(ClassMemberKind.Field);
+        m.field = decl;
+        return m;
+    }
+
+    public static ClassMember makeMethod(MethodDecl decl) {
+        ClassMember m = new ClassMember(ClassMemberKind.Method);
+        m.method = decl;
+        return m;
+    }
+
+    public static ClassMember makeConstructor(ConstructorDecl decl) {
+        ClassMember m = new ClassMember(ClassMemberKind.Constructor);
+        m.constructor = decl;
+        return m;
+    }
+
+    public static ClassMember makeDestructor(DestructorDecl decl) {
+        ClassMember m = new ClassMember(ClassMemberKind.Destructor);
+        m.destructor = decl;
+        return m;
+    }
+}
+
+// 方法声明
+class MethodDecl {
+    public TypeRef returnType;
+    public String name;
+    public Array<Param> params;
+    public Block body;                 // null 表示抽象方法
+    public Array<int> modifiers;       // MethodModifier 值的数组
+
+    public MethodDecl(TypeRef returnType, String name, Array<Param> params,
+                      Block body, Array<int> modifiers) {
+        this.returnType = returnType;
+        this.name = name;
+        this.params = params;
+        this.body = body;
+        this.modifiers = modifiers;
+    }
+}
+
+// 构造函数声明
+class ConstructorDecl {
+    public String name;
+    public Array<Param> params;
+    public Block body;
+
+    public ConstructorDecl(String name, Array<Param> params, Block body) {
+        this.name = name;
+        this.params = params;
+        this.body = body;
+    }
+}
+
+// 析构函数声明
+class DestructorDecl {
+    public String name;
+    public Block body;
+
+    public DestructorDecl(String name, Block body) {
+        this.name = name;
+        this.body = body;
+    }
+}
+
+// ============================================================
+// 接口成员节点
+// ============================================================
+
+// 接口成员：MethodSignature | Field
+class InterfaceMember {
+    public int kind;
+    public MethodSignature methodSignature;
+    public VarDecl field;
+
+    public InterfaceMember(int k) {
+        this.kind = k;
+        this.methodSignature = null;
+        this.field = null;
+    }
+
+    public static InterfaceMember makeMethodSignature(MethodSignature sig) {
+        InterfaceMember m = new InterfaceMember(InterfaceMemberKind.MethodSignature);
+        m.methodSignature = sig;
+        return m;
+    }
+
+    public static InterfaceMember makeField(VarDecl decl) {
+        InterfaceMember m = new InterfaceMember(InterfaceMemberKind.Field);
+        m.field = decl;
+        return m;
+    }
+}
+
+// 方法签名
+class MethodSignature {
+    public TypeRef returnType;
+    public String name;
+    public Array<Param> params;
+
+    public MethodSignature(TypeRef returnType, String name, Array<Param> params) {
+        this.returnType = returnType;
+        this.name = name;
+        this.params = params;
+    }
+}
+
+// ============================================================
+// 语句节点
+// ============================================================
+
+// 语句块
+class Block {
+    public Array<Stmt> statements;
+
+    public Block(Array<Stmt> statements) {
+        this.statements = statements;
+    }
+
+    public static Block empty() {
+        return new Block(new Array<Stmt>());
+    }
+}
+
+// 语句：Block | Expr | If | For | ForEach | While | Return | Break | Continue | Try | VarDecl | Switch
+class Stmt {
+    public int kind;
+    // Block
+    public Array<Stmt> statements;
+    // Expr
+    public Expr expr;
+    // If, While
+    public Expr condition;
+    // If
+    public Stmt thenBranch;
+    public Stmt elseBranch;
+    // For
+    public Stmt init;                  // null 表示无初始化
+    public Expr forCond;               // null 表示无条件
+    public Expr update;                // null 表示无更新
+    public Stmt body;
+    // ForEach
+    public TypeRef forEachType;
+    public String forEachVarName;
+    public Expr forEachIterable;
+    // Return
+    public Expr returnValue;           // null 表示无返回值
+    // Try
+    public Block tryBlock;
+    public Array<CatchClause> catchClauses;
+    public Block finallyBlock;         // null 表示无 finally
+    // VarDecl
+    public VarDecl varDecl;
+    // Switch
+    public Expr switchExpr;
+    public Array<SwitchCase> cases;
+    public Block defaultBlock;         // null 表示无 default
+
+    public Stmt(int k) {
+        this.kind = k;
+        this.statements = null;
+        this.expr = null;
+        this.condition = null;
+        this.thenBranch = null;
+        this.elseBranch = null;
+        this.init = null;
+        this.forCond = null;
+        this.update = null;
+        this.body = null;
+        this.forEachType = null;
+        this.forEachVarName = "";
+        this.forEachIterable = null;
+        this.returnValue = null;
+        this.tryBlock = null;
+        this.catchClauses = null;
+        this.finallyBlock = null;
+        this.varDecl = null;
+        this.switchExpr = null;
+        this.cases = null;
+        this.defaultBlock = null;
+    }
+
+    public static Stmt makeBlock(Array<Stmt> statements) {
+        Stmt s = new Stmt(StmtKind.Block);
+        s.statements = statements;
+        return s;
+    }
+
+    public static Stmt makeExpr(Expr expr) {
+        Stmt s = new Stmt(StmtKind.Expr);
+        s.expr = expr;
+        return s;
+    }
+
+    public static Stmt makeIf(Expr condition, Stmt thenBranch, Stmt elseBranch) {
+        Stmt s = new Stmt(StmtKind.If);
+        s.condition = condition;
+        s.thenBranch = thenBranch;
+        s.elseBranch = elseBranch;
+        return s;
+    }
+
+    public static Stmt makeFor(Stmt init, Expr forCond, Expr update, Stmt body) {
+        Stmt s = new Stmt(StmtKind.For);
+        s.init = init;
+        s.forCond = forCond;
+        s.update = update;
+        s.body = body;
+        return s;
+    }
+
+    public static Stmt makeForEach(TypeRef forEachType, String forEachVarName,
+                                   Expr forEachIterable, Stmt body) {
+        Stmt s = new Stmt(StmtKind.ForEach);
+        s.forEachType = forEachType;
+        s.forEachVarName = forEachVarName;
+        s.forEachIterable = forEachIterable;
+        s.body = body;
+        return s;
+    }
+
+    public static Stmt makeWhile(Expr condition, Stmt body) {
+        Stmt s = new Stmt(StmtKind.While);
+        s.condition = condition;
+        s.body = body;
+        return s;
+    }
+
+    public static Stmt makeReturn(Expr returnValue) {
+        Stmt s = new Stmt(StmtKind.Return);
+        s.returnValue = returnValue;
+        return s;
+    }
+
+    public static Stmt makeBreak() {
+        return new Stmt(StmtKind.Break);
+    }
+
+    public static Stmt makeContinue() {
+        return new Stmt(StmtKind.Continue);
+    }
+
+    public static Stmt makeTry(Block tryBlock, Array<CatchClause> catchClauses,
+                               Block finallyBlock) {
+        Stmt s = new Stmt(StmtKind.Try);
+        s.tryBlock = tryBlock;
+        s.catchClauses = catchClauses;
+        s.finallyBlock = finallyBlock;
+        return s;
+    }
+
+    public static Stmt makeVarDecl(VarDecl varDecl) {
+        Stmt s = new Stmt(StmtKind.VarDecl);
+        s.varDecl = varDecl;
+        return s;
+    }
+
+    public static Stmt makeSwitch(Expr switchExpr, Array<SwitchCase> cases,
+                                  Block defaultBlock) {
+        Stmt s = new Stmt(StmtKind.Switch);
+        s.switchExpr = switchExpr;
+        s.cases = cases;
+        s.defaultBlock = defaultBlock;
+        return s;
+    }
+}
+
+// switch case
+class SwitchCase {
+    public Array<Expr> patterns;
+    public Block body;
+
+    public SwitchCase(Array<Expr> patterns, Block body) {
+        this.patterns = patterns;
+        this.body = body;
+    }
+}
+
+// catch 子句
+class CatchClause {
+    public TypeRef varType;
+    public String name;
+    public Block body;
+
+    public CatchClause(TypeRef varType, String name, Block body) {
+        this.varType = varType;
+        this.name = name;
+        this.body = body;
+    }
+}
+
+// ============================================================
+// 表达式节点
+// ============================================================
+
+// 表达式：所有变体共用一个 class，kind 区分变体
+// strValue 复用于：StringLiteral, Variable, MethodCall(methodName), FieldAccess(fieldName), New(className)
+// operand 复用于：UnaryOp, Delete, Cast, TypeId, Throw
+// receiver 复用于：MethodCall, FieldAccess, ArrayAccess, InstanceOf
+// args 复用于：Call, MethodCall, New(constructorArgs)
+class Expr {
+    public int kind;
+    // IntegerLiteral
+    public long longValue;
+    // FloatLiteral
+    public double doubleValue;
+    // StringLiteral / Variable / MethodCall(methodName) / FieldAccess(fieldName) / New(className)
+    public String strValue;
+    // CharLiteral
+    public char charValue;
+    // BoolLiteral
+    public bool boolValue;
+    // BinaryOp / UnaryOp
+    public int opValue;
+    // BinaryOp
+    public Expr left;
+    public Expr right;
+    // UnaryOp / Delete / Cast / TypeId / Throw
+    public Expr operand;
+    // Assignment
+    public Expr target;
+    public Expr value;
+    // Call
+    public Expr callee;
+    // Call / MethodCall / New(constructorArgs)
+    public Array<Expr> args;
+    // MethodCall / FieldAccess / ArrayAccess / InstanceOf
+    public Expr receiver;
+    // ArrayAccess
+    public Expr index;
+    // New
+    public Array<TypeRef> typeArgs;
+    // Cast / Sizeof
+    public TypeRef castType;
+    // InstanceOf
+    public TypeRef typeRef;
+    // Lambda
+    public Array<Param> lambdaParams;
+    public LambdaBody lambdaBody;
+    // Ternary
+    public Expr condition;
+    public Expr thenExpr;
+    public Expr elseExpr;
+    // Match
+    public Expr matchExpr;
+    public Array<MatchArm> matchArms;
+
+    public Expr(int k) {
+        this.kind = k;
+        this.longValue = 0;
+        this.doubleValue = 0.0;
+        this.strValue = "";
+        this.charValue = '\0';
+        this.boolValue = false;
+        this.opValue = 0;
+        this.left = null;
+        this.right = null;
+        this.operand = null;
+        this.target = null;
+        this.value = null;
+        this.callee = null;
+        this.args = null;
+        this.receiver = null;
+        this.index = null;
+        this.typeArgs = null;
+        this.castType = null;
+        this.typeRef = null;
+        this.lambdaParams = null;
+        this.lambdaBody = null;
+        this.condition = null;
+        this.thenExpr = null;
+        this.elseExpr = null;
+        this.matchExpr = null;
+        this.matchArms = null;
+    }
+
+    public static Expr makeIntegerLiteral(long v) {
+        Expr e = new Expr(ExprKind.IntegerLiteral);
+        e.longValue = v;
+        return e;
+    }
+
+    public static Expr makeFloatLiteral(double v) {
+        Expr e = new Expr(ExprKind.FloatLiteral);
+        e.doubleValue = v;
+        return e;
+    }
+
+    public static Expr makeStringLiteral(String v) {
+        Expr e = new Expr(ExprKind.StringLiteral);
+        e.strValue = v;
+        return e;
+    }
+
+    public static Expr makeCharLiteral(char v) {
+        Expr e = new Expr(ExprKind.CharLiteral);
+        e.charValue = v;
+        return e;
+    }
+
+    public static Expr makeBoolLiteral(bool v) {
+        Expr e = new Expr(ExprKind.BoolLiteral);
+        e.boolValue = v;
+        return e;
+    }
+
+    public static Expr makeNull() {
+        return new Expr(ExprKind.Null);
+    }
+
+    public static Expr makeThis() {
+        return new Expr(ExprKind.This);
+    }
+
+    public static Expr makeSuper() {
+        return new Expr(ExprKind.Super);
+    }
+
+    public static Expr makeVariable(String name) {
+        Expr e = new Expr(ExprKind.Variable);
+        e.strValue = name;
+        return e;
+    }
+
+    public static Expr makeBinaryOp(int op, Expr left, Expr right) {
+        Expr e = new Expr(ExprKind.BinaryOp);
+        e.opValue = op;
+        e.left = left;
+        e.right = right;
+        return e;
+    }
+
+    public static Expr makeUnaryOp(int op, Expr operand) {
+        Expr e = new Expr(ExprKind.UnaryOp);
+        e.opValue = op;
+        e.operand = operand;
+        return e;
+    }
+
+    public static Expr makeAssignment(Expr target, Expr value) {
+        Expr e = new Expr(ExprKind.Assignment);
+        e.target = target;
+        e.value = value;
+        return e;
+    }
+
+    public static Expr makeCall(Expr callee, Array<Expr> args) {
+        Expr e = new Expr(ExprKind.Call);
+        e.callee = callee;
+        e.args = args;
+        return e;
+    }
+
+    public static Expr makeMethodCall(Expr receiver, String methodName, Array<Expr> args) {
+        Expr e = new Expr(ExprKind.MethodCall);
+        e.receiver = receiver;
+        e.strValue = methodName;
+        e.args = args;
+        return e;
+    }
+
+    public static Expr makeFieldAccess(Expr receiver, String fieldName) {
+        Expr e = new Expr(ExprKind.FieldAccess);
+        e.receiver = receiver;
+        e.strValue = fieldName;
+        return e;
+    }
+
+    public static Expr makeArrayAccess(Expr receiver, Expr index) {
+        Expr e = new Expr(ExprKind.ArrayAccess);
+        e.receiver = receiver;
+        e.index = index;
+        return e;
+    }
+
+    public static Expr makeNew(String className, Array<TypeRef> typeArgs, Array<Expr> constructorArgs) {
+        Expr e = new Expr(ExprKind.New);
+        e.strValue = className;
+        e.typeArgs = typeArgs;
+        e.args = constructorArgs;
+        return e;
+    }
+
+    public static Expr makeDelete(Expr operand) {
+        Expr e = new Expr(ExprKind.Delete);
+        e.operand = operand;
+        return e;
+    }
+
+    public static Expr makeCast(TypeRef castType, Expr operand) {
+        Expr e = new Expr(ExprKind.Cast);
+        e.castType = castType;
+        e.operand = operand;
+        return e;
+    }
+
+    public static Expr makeInstanceOf(Expr receiver, TypeRef typeRef) {
+        Expr e = new Expr(ExprKind.InstanceOf);
+        e.receiver = receiver;
+        e.typeRef = typeRef;
+        return e;
+    }
+
+    public static Expr makeSizeof(TypeRef sizeofType) {
+        Expr e = new Expr(ExprKind.Sizeof);
+        e.castType = sizeofType;
+        return e;
+    }
+
+    public static Expr makeTypeId(Expr operand) {
+        Expr e = new Expr(ExprKind.TypeId);
+        e.operand = operand;
+        return e;
+    }
+
+    public static Expr makeLambda(Array<Param> params, LambdaBody body) {
+        Expr e = new Expr(ExprKind.Lambda);
+        e.lambdaParams = params;
+        e.lambdaBody = body;
+        return e;
+    }
+
+    public static Expr makeTernary(Expr condition, Expr thenExpr, Expr elseExpr) {
+        Expr e = new Expr(ExprKind.Ternary);
+        e.condition = condition;
+        e.thenExpr = thenExpr;
+        e.elseExpr = elseExpr;
+        return e;
+    }
+
+    public static Expr makeThrow(Expr operand) {
+        Expr e = new Expr(ExprKind.Throw);
+        e.operand = operand;
+        return e;
+    }
+
+    public static Expr makeMatch(Expr matchExpr, Array<MatchArm> matchArms) {
+        Expr e = new Expr(ExprKind.Match);
+        e.matchExpr = matchExpr;
+        e.matchArms = matchArms;
+        return e;
+    }
+}
+
+// ============================================================
+// Match 相关节点
+// ============================================================
+
+// match 臂
+class MatchArm {
+    public MatchPattern pattern;
+    public MatchBody body;
+
+    public MatchArm(MatchPattern pattern, MatchBody body) {
+        this.pattern = pattern;
+        this.body = body;
+    }
+}
+
+// match 模式：Variant(name, bindings) | Wildcard | Literal(expr) | Or(patterns)
+class MatchPattern {
+    public int kind;
+    // Variant
+    public String name;                    // Variant: 变体名
+    public Array<MatchBinding> bindings;   // Variant: 绑定列表
+    // Literal
+    public Expr literalExpr;               // Literal: 字面量表达式
+    // Or
+    public Array<MatchPattern> patterns;   // Or: 子模式列表
+
+    public MatchPattern(int k) {
+        this.kind = k;
+        this.name = "";
+        this.bindings = null;
+        this.literalExpr = null;
+        this.patterns = null;
+    }
+
+    public static MatchPattern makeVariant(String name, Array<MatchBinding> bindings) {
+        MatchPattern p = new MatchPattern(MatchPatternKind.Variant);
+        p.name = name;
+        p.bindings = bindings;
+        return p;
+    }
+
+    public static MatchPattern makeWildcard() {
+        return new MatchPattern(MatchPatternKind.Wildcard);
+    }
+
+    public static MatchPattern makeLiteral(Expr expr) {
+        MatchPattern p = new MatchPattern(MatchPatternKind.Literal);
+        p.literalExpr = expr;
+        return p;
+    }
+
+    public static MatchPattern makeOr(Array<MatchPattern> patterns) {
+        MatchPattern p = new MatchPattern(MatchPatternKind.Or);
+        p.patterns = patterns;
+        return p;
+    }
+}
+
+// match 绑定
+class MatchBinding {
+    public TypeRef fieldType;
+    public String name;
+
+    public MatchBinding(TypeRef fieldType, String name) {
+        this.fieldType = fieldType;
+        this.name = name;
+    }
+}
+
+// match 体：Expr | Block
+class MatchBody {
+    public int kind;
+    public Expr expr;
+    public Block block;
+
+    public MatchBody(int k) {
+        this.kind = k;
+        this.expr = null;
+        this.block = null;
+    }
+
+    public static MatchBody makeExpr(Expr expr) {
+        MatchBody b = new MatchBody(MatchBodyKind.Expr);
+        b.expr = expr;
+        return b;
+    }
+
+    public static MatchBody makeBlock(Block block) {
+        MatchBody b = new MatchBody(MatchBodyKind.Block);
+        b.block = block;
+        return b;
+    }
+}
+
+// Lambda 体：Expr | Block
+class LambdaBody {
+    public int kind;
+    public Expr expr;
+    public Block block;
+
+    public LambdaBody(int k) {
+        this.kind = k;
+        this.expr = null;
+        this.block = null;
+    }
+
+    public static LambdaBody makeExpr(Expr expr) {
+        LambdaBody b = new LambdaBody(LambdaBodyKind.Expr);
+        b.expr = expr;
+        return b;
+    }
+
+    public static LambdaBody makeBlock(Block block) {
+        LambdaBody b = new LambdaBody(LambdaBodyKind.Block);
+        b.block = block;
+        return b;
+    }
+}
+
+// ============================================================
+// 顶层节点
+// ============================================================
+
+// 程序顶层节点
+class Program {
+    public Array<Declaration> declarations;
+
+    public Program(Array<Declaration> declarations) {
+        this.declarations = declarations;
+    }
+}

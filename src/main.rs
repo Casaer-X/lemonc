@@ -61,6 +61,7 @@ fn main() {
     }
 
     let lex_only = args.contains(&"--lex-only".to_string());
+    let dump_tokens = args.contains(&"--dump-tokens".to_string());
     let parse_only = args.contains(&"--parse-only".to_string());
     let keep_intermediate = args.contains(&"--keep-intermediate".to_string());
     let target = get_target(&args);
@@ -99,6 +100,16 @@ fn main() {
         let lexer = Lexer::new(&source);
         let tokens: Vec<_> = lexer.collect();
         total_tokens += tokens.len();
+
+        if dump_tokens {
+            use std::io::Write;
+            let mut f = std::fs::File::create("dump_tokens.txt").unwrap();
+            for tok in &tokens {
+                writeln!(f, "{:?}", tok).unwrap();
+            }
+            println!("Dumped {} tokens to dump_tokens.txt", tokens.len());
+            return;
+        }
 
         if lex_only && file_idx == input_files.len() - 1 {
             println!("  Tokenized {} tokens (total)", total_tokens);
@@ -748,6 +759,7 @@ fn print_usage() {
     eprintln!("  -o <file>       Output file");
     eprintln!("  -O<level>       Optimization level (0-3)");
     eprintln!("  --lex-only      Only run lexer");
+    eprintln!("  --dump-tokens   Dump all tokens and exit");
     eprintln!("  --parse-only    Only run lexer + parser");
     eprintln!("  --target <tgt>  Target: c, nasm, exe, native, bytecode");
     eprintln!("  --keep-intermediate  Keep intermediate files (.c/.asm)");

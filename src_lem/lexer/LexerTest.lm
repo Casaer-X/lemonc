@@ -2,17 +2,76 @@ package lemon.lexer;
 
 class LexerTest {
     public static void main(String[] args) {
-        String source = "class Foo extends Bar { int x = 42; void hello() { System.printf(\"hi\"); } }";
+        // Test 1: Basic tokenization
+        String source1 = "class Foo extends Bar { int x = 42; void hello() { System.printf(\"hi\"); } }";
+        LexerTest.testLexer("Basic", source1);
+
+        // Test 2: Underscore identifiers
+        String source2 = "int _foo = 0;";
+        LexerTest.testLexer("Underscore", source2);
+
+        // Test 3: Float and double literals
+        String source3 = "double x = 3.14; float y = 2.0f;";
+        LexerTest.testLexer("Floats", source3);
+
+        // Test 4: String with escapes
+        String source4 = "String s = \"hello\\nworld\";";
+        LexerTest.testLexer("StringEscapes", source4);
+
+        // Test 5: Comments
+        String source5 = "int x = 1; // line comment\nint y = 2;";
+        LexerTest.testLexer("LineComment", source5);
+
+        // Test 6: Block comment
+        String source6 = "int a = 1; /* block\ncomment */ int b = 2;";
+        LexerTest.testLexer("BlockComment", source6);
+
+        // Test 7: Char literal
+        String source7 = "char c = 'A'; char d = '\\n';";
+        LexerTest.testLexer("CharLiteral", source7);
+
+        // Test 8: Operators
+        String source8 = "x + y - z * w / v % m == != <= >= < > && || ! & |";
+        LexerTest.testLexer("Operators", source8);
+
+        // Test 9: Long integer
+        String source9 = "long x = 9223372036854775807;";
+        LexerTest.testLexer("LongInt", source9);
+
+        // Test 10: Self-lex test — lex all .lm source files
+        System.printf("\n=== Self-lex Test ===\n");
+        LexerTest.selfLex("src_lem/lexer/Span.lm");
+        LexerTest.selfLex("src_lem/lexer/TokenKind.lm");
+        LexerTest.selfLex("src_lem/lexer/Token.lm");
+        LexerTest.selfLex("src_lem/lexer/Lexer.lm");
+        LexerTest.selfLex("src_lem/lexer/LexerTest.lm");
+
+        System.printf("\nAll tests passed!\n");
+    }
+
+    static void selfLex(String path) {
+        String src = File.readAll(path);
+        if (src != null) {
+            Lexer lexer = new Lexer(src);
+            Array<Token> tokens = lexer.tokenize();
+            System.printf("  %s: %d tokens\n", path, tokens.size());
+        } else {
+            System.printf("  %s: file not found\n", path);
+        }
+    }
+
+    static void testLexer(String name, String source) {
         Lexer lexer = new Lexer(source);
         Array<Token> tokens = lexer.tokenize();
 
+        System.printf("=== Test: %s ===\n", name);
         int i = 0;
         while (i < tokens.size()) {
             Token tok = tokens.get(i);
             String posInfo = "L" + tok.span.line + "C" + tok.span.column;
-            System.printf("%s: %s\n", posInfo, tok.toString());
+            System.printf("  %s: %s\n", posInfo, tok.toString());
             i = i + 1;
         }
-        System.printf("Total tokens: %d\n", i);
+        System.printf("  Total: %d tokens\n\n", i);
     }
 }

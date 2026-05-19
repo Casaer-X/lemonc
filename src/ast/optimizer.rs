@@ -129,6 +129,16 @@ impl AstOptimizer {
                 }
             }
             Stmt::While(cond, body) => {
+                // Collect variables assigned in the loop body and invalidate them
+                // before optimizing, since loop bodies execute multiple times
+                let assigned = {
+                    let mut vars = Vec::new();
+                    Self::collect_assigned_vars_stmt_impl(body, &mut vars);
+                    vars
+                };
+                for var in &assigned {
+                    self.constant_env.remove(var);
+                }
                 self.optimize_expr(cond);
                 if let Expr::BoolLiteral(false) = cond {
                     self.stats.dead_code_removed += 1;
@@ -138,8 +148,20 @@ impl AstOptimizer {
                 }
             }
             Stmt::For(init, cond, update, body) => {
-                if let Some(stmt) = init {
-                    self.optimize_stmt(&mut stmt.as_ref().clone());
+                if let Some(s) = init {
+                    self.optimize_stmt(&mut s.as_ref().clone());
+                }
+                // Collect variables assigned in the loop body and update expression
+                let assigned = {
+                    let mut vars = Vec::new();
+                    Self::collect_assigned_vars_stmt_impl(body, &mut vars);
+                    if let Some(e) = update {
+                        Self::collect_assigned_vars_expr_impl(e, &mut vars);
+                    }
+                    vars
+                };
+                for var in &assigned {
+                    self.constant_env.remove(var);
                 }
                 if let Some(e) = cond {
                     self.optimize_expr(e);
@@ -217,7 +239,17 @@ impl AstOptimizer {
                 }
             }
             Expr::Assignment(target, value) => {
-                self.optimize_expr(target);
+                // When a variable is reassigned, it's no longer a constant
+                if let Expr::Variable(name) = target.as_ref() {
+                    self.constant_env.remove(name);
+                }
+                // Don't apply constant propagation to the assignment target (LHS)
+                // Only optimize sub-expressions within field/array access targets
+                match target.as_mut() {
+                    Expr::FieldAccess(obj, _) => { self.optimize_expr(obj); }
+                    Expr::ArrayAccess(arr, idx) => { self.optimize_expr(arr); self.optimize_expr(idx); }
+                    _ => {} // Variable, this, super, etc. — don't propagate constants into LHS
+                }
                 self.optimize_expr(value);
             }
             Expr::Call(callee, args) => {
@@ -297,6 +329,111 @@ impl AstOptimizer {
             Expr::Throw(e) => {
                 self.optimize_expr(e);
             }
+        }
+    }
+
+    /// Collect all variable names that are assigned within a statement
+    fn collect_assigned_vars_stmt(stmt: &Stmt) -> Vec<String> {
+        let mut vars = Vec::new();
+        Self::collect_assigned_vars_stmt_impl(stmt, &mut vars);
+        vars
+    }
+
+    fn collect_assigned_vars_stmt_impl(stmt: &Stmt, vars: &mut Vec<String>) {
+        match stmt {
+            Stmt::Block(block) => {
+                for s in &block.statements {
+                    Self::collect_assigned_vars_stmt_impl(s, vars);
+                }
+            }
+            Stmt::If(_, then, else_) => {
+                Self::collect_assigned_vars_stmt_impl(then, vars);
+                if let Some(e) = else_ {
+                    Self::collect_assigned_vars_stmt_impl(e, vars);
+                }
+            }
+            Stmt::While(_, body) => {
+                Self::collect_assigned_vars_stmt_impl(body, vars);
+            }
+            Stmt::For(_, _, _, body) => {
+                Self::collect_assigned_vars_stmt_impl(body, vars);
+            }
+            Stmt::Expr(expr) => {
+                Self::collect_assigned_vars_expr_impl(expr, vars);
+            }
+            Stmt::VarDecl(var) => {
+                vars.push(var.name.clone());
+            }
+            Stmt::Return(_)
+            | Stmt::Break
+            | Stmt::Continue => {}
+            Stmt::Try(try_block, catches, finally) => {
+                for s in &try_block.statements {
+                    Self::collect_assigned_vars_stmt_impl(s, vars);
+                }
+                for catch in catches {
+                    for s in &catch.body.statements {
+                        Self::collect_assigned_vars_stmt_impl(s, vars);
+                    }
+                }
+                if let Some(f) = finally {
+                    for s in &f.statements {
+                        Self::collect_assigned_vars_stmt_impl(s, vars);
+                    }
+                }
+            }
+            Stmt::ForEach(_, _, _, body) => {
+                Self::collect_assigned_vars_stmt_impl(body, vars);
+            }
+            Stmt::Switch(_, cases, default) => {
+                for case in cases {
+                    for s in &case.body.statements {
+                        Self::collect_assigned_vars_stmt_impl(s, vars);
+                    }
+                }
+                if let Some(d) = default {
+                    for s in &d.statements {
+                        Self::collect_assigned_vars_stmt_impl(s, vars);
+                    }
+                }
+            }
+        }
+    }
+
+    fn collect_assigned_vars_expr_impl(expr: &Expr, vars: &mut Vec<String>) {
+        match expr {
+            Expr::Assignment(target, _value) => {
+                if let Expr::Variable(name) = target.as_ref() {
+                    vars.push(name.clone());
+                }
+                // Also check nested assignments in value
+                Self::collect_assigned_vars_expr_impl(_value, vars);
+            }
+            Expr::BinaryOp(_, left, right) => {
+                Self::collect_assigned_vars_expr_impl(left, vars);
+                Self::collect_assigned_vars_expr_impl(right, vars);
+            }
+            Expr::UnaryOp(_, e) => {
+                Self::collect_assigned_vars_expr_impl(e, vars);
+            }
+            Expr::Call(callee, args) => {
+                Self::collect_assigned_vars_expr_impl(callee, vars);
+                for arg in args {
+                    Self::collect_assigned_vars_expr_impl(arg, vars);
+                }
+            }
+            Expr::MethodCall(obj, _, args) => {
+                Self::collect_assigned_vars_expr_impl(obj, vars);
+                for arg in args {
+                    Self::collect_assigned_vars_expr_impl(arg, vars);
+                }
+            }
+            Expr::Ternary(cond, then, else_) => {
+                Self::collect_assigned_vars_expr_impl(cond, vars);
+                Self::collect_assigned_vars_expr_impl(then, vars);
+                Self::collect_assigned_vars_expr_impl(else_, vars);
+            }
+            _ => {}
         }
     }
 

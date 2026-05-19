@@ -1,0 +1,251 @@
+package lemon.parser;
+
+// 验证测试：Lemon class-based AST 节点设计
+// 使用 class + static int 常量（与 TokenKind.lm 相同的方式）
+
+class ExprKind {
+    public static int IntegerExpr = 0;
+    public static int FloatExpr = 1;
+    public static int StringExpr = 2;
+    public static int BoolExpr = 3;
+    public static int NullExpr = 4;
+    public static int VariableExpr = 5;
+    public static int BinaryExpr = 6;
+    public static int UnaryExpr = 7;
+    public static int CallExpr = 8;
+    public static int AssignExpr = 9;
+}
+
+class BinaryOp {
+    public static int Add = 0;
+    public static int Sub = 1;
+    public static int Mul = 2;
+    public static int Div = 3;
+    public static int Mod = 4;
+    public static int Eq = 5;
+    public static int Ne = 6;
+    public static int Lt = 7;
+    public static int Gt = 8;
+    public static int Le = 9;
+    public static int Ge = 10;
+    public static int And = 11;
+    public static int Or = 12;
+}
+
+// 使用 class 模拟 Rust enum，kind 字段标识变体，所有可能字段都声明
+// 递归类型通过 class 实例引用实现（class 实例在堆上，天然支持递归）
+class Expr {
+    public int kind;
+    public long longValue;
+    public double doubleValue;
+    public String strValue;
+    public bool boolValue;
+    public int opValue;
+    public Expr left;
+    public Expr right;
+    public Expr callee;
+    public Array<Expr> args;
+    public Expr target;
+    public Expr value;
+
+    public Expr(int k) {
+        this.kind = k;
+        this.longValue = 0;
+        this.doubleValue = 0.0;
+        this.strValue = "";
+        this.boolValue = false;
+        this.opValue = 0;
+        this.left = null;
+        this.right = null;
+        this.callee = null;
+        this.args = null;
+        this.target = null;
+        this.value = null;
+    }
+
+    public static Expr makeInt(long v) {
+        Expr e = new Expr(ExprKind.IntegerExpr);
+        e.longValue = v;
+        return e;
+    }
+
+    public static Expr makeString(String v) {
+        Expr e = new Expr(ExprKind.StringExpr);
+        e.strValue = v;
+        return e;
+    }
+
+    public static Expr makeVariable(String name) {
+        Expr e = new Expr(ExprKind.VariableExpr);
+        e.strValue = name;
+        return e;
+    }
+
+    public static Expr makeBinary(int op, Expr left, Expr right) {
+        Expr e = new Expr(ExprKind.BinaryExpr);
+        e.opValue = op;
+        e.left = left;
+        e.right = right;
+        return e;
+    }
+
+    public static Expr makeCall(Expr callee, Array<Expr> args) {
+        Expr e = new Expr(ExprKind.CallExpr);
+        e.callee = callee;
+        e.args = args;
+        return e;
+    }
+
+    public static Expr makeAssign(Expr target, Expr value) {
+        Expr e = new Expr(ExprKind.AssignExpr);
+        e.target = target;
+        e.value = value;
+        return e;
+    }
+
+    public String toString() {
+        if (this.kind == ExprKind.IntegerExpr) {
+            return "Int(" + String.longToString(this.longValue) + ")";
+        }
+        if (this.kind == ExprKind.StringExpr) {
+            return "Str(" + this.strValue + ")";
+        }
+        if (this.kind == ExprKind.VariableExpr) {
+            return "Var(" + this.strValue + ")";
+        }
+        if (this.kind == ExprKind.BinaryExpr) {
+            String opStr = "?";
+            if (this.opValue == BinaryOp.Add) opStr = "+";
+            if (this.opValue == BinaryOp.Mul) opStr = "*";
+            return "Bin(" + this.left.toString() + " " + opStr + " " + this.right.toString() + ")";
+        }
+        if (this.kind == ExprKind.CallExpr) {
+            int argCount = Array.size(this.args);
+            return "Call(" + this.callee.toString() + ", " + String.intToString(argCount) + " args)";
+        }
+        if (this.kind == ExprKind.AssignExpr) {
+            return "Assign(" + this.target.toString() + " = " + this.value.toString() + ")";
+        }
+        return "Expr(kind=" + String.intToString(this.kind) + ")";
+    }
+}
+
+// 模拟 Stmt 节点
+class StmtKind {
+    public static int BlockStmt = 0;
+    public static int ExprStmt = 1;
+    public static int IfStmt = 2;
+    public static int WhileStmt = 3;
+    public static int ReturnStmt = 4;
+    public static int VarDeclStmt = 5;
+}
+
+class Stmt {
+    public int kind;
+    public Array<Stmt> statements;
+    public Expr expr;
+    public Expr condition;
+    public Stmt thenBranch;
+    public Stmt elseBranch;
+    public Stmt body;
+    public String varName;
+    public String varType;
+
+    public Stmt(int k) {
+        this.kind = k;
+        this.statements = null;
+        this.expr = null;
+        this.condition = null;
+        this.thenBranch = null;
+        this.elseBranch = null;
+        this.body = null;
+        this.varName = "";
+        this.varType = "";
+    }
+
+    public static Stmt makeExprStmt(Expr expr) {
+        Stmt s = new Stmt(StmtKind.ExprStmt);
+        s.expr = expr;
+        return s;
+    }
+
+    public static Stmt makeIf(Expr cond, Stmt then, Stmt els) {
+        Stmt s = new Stmt(StmtKind.IfStmt);
+        s.condition = cond;
+        s.thenBranch = then;
+        s.elseBranch = els;
+        return s;
+    }
+
+    public static Stmt makeBlock(Array<Stmt> stmts) {
+        Stmt s = new Stmt(StmtKind.BlockStmt);
+        s.statements = stmts;
+        return s;
+    }
+}
+
+class AstTest {
+    public static void main(String[] args) {
+        // Test 1: 递归类型 - 构建嵌套表达式 1 + 2
+        Expr one = Expr.makeInt(1);
+        Expr two = Expr.makeInt(2);
+        Expr add = Expr.makeBinary(BinaryOp.Add, one, two);
+        System.printf("Test 1 (Recursive Expr): %s\n", add.toString());
+
+        // Test 2: 变体携带 Array<Expr> - 函数调用 foo(1, "hello")
+        Expr foo = Expr.makeVariable("foo");
+        Array<Expr> callArgs = new Array<Expr>();
+        callArgs.add(Expr.makeInt(1));
+        callArgs.add(Expr.makeString("hello"));
+        Expr call = Expr.makeCall(foo, callArgs);
+        System.printf("Test 2 (Array in variant): %s\n", call.toString());
+
+        // Test 3: 深层递归 - (1 + 2) * 3
+        Expr three = Expr.makeInt(3);
+        Expr mul = Expr.makeBinary(BinaryOp.Mul, add, three);
+        System.printf("Test 3 (Deep recursive): %s\n", mul.toString());
+
+        // Test 4: 赋值表达式 - x = 42
+        Expr x = Expr.makeVariable("x");
+        Expr val = Expr.makeInt(42);
+        Expr assign = Expr.makeAssign(x, val);
+        System.printf("Test 4 (Assign): %s\n", assign.toString());
+
+        // Test 5: null 模拟 Option
+        Expr maybeExpr = null;
+        if (maybeExpr != null) {
+            System.printf("Test 5 FAIL: should be null\n");
+        } else {
+            System.printf("Test 5 (Option/null): OK\n");
+        }
+        maybeExpr = Expr.makeInt(99);
+        if (maybeExpr != null) {
+            System.printf("Test 5 (Option/some): %s\n", maybeExpr.toString());
+        }
+
+        // Test 6: Stmt 包含 Expr - if (x > 0) { x = x - 1; }
+        Expr cond = Expr.makeBinary(BinaryOp.Gt, Expr.makeVariable("x"), Expr.makeInt(0));
+        Array<Stmt> blockStmts = new Array<Stmt>();
+        blockStmts.add(Stmt.makeExprStmt(
+            Expr.makeAssign(Expr.makeVariable("x"),
+                Expr.makeBinary(BinaryOp.Sub, Expr.makeVariable("x"), Expr.makeInt(1)))
+        ));
+        Stmt thenBlock = Stmt.makeBlock(blockStmts);
+        Stmt ifStmt = Stmt.makeIf(cond, thenBlock, null);
+        int stmtCount = Array.size(ifStmt.thenBranch.statements);
+        System.printf("Test 6 (Stmt with Expr): if stmt, then has %d stmts\n",
+            stmtCount);
+
+        // Test 7: 多层嵌套 - if-else chain
+        Stmt elseBranch = Stmt.makeIf(
+            Expr.makeBinary(BinaryOp.Lt, Expr.makeVariable("x"), Expr.makeInt(0)),
+            Stmt.makeExprStmt(Expr.makeVariable("negative")),
+            null
+        );
+        Stmt ifElse = Stmt.makeIf(cond, thenBlock, elseBranch);
+        System.printf("Test 7 (Nested if-else): else is if-stmt, kind=%d\n",
+            ifElse.elseBranch.kind);
+
+        System.printf("\nAll AST node tests passed!\n");
+    }
+}

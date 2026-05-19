@@ -263,6 +263,7 @@ impl<'a> Lexer<'a> {
                         Some('n') => { value.push('\n'); self.advance(); }
                         Some('t') => { value.push('\t'); self.advance(); }
                         Some('r') => { value.push('\r'); self.advance(); }
+                        Some('0') => { value.push('\0'); self.advance(); }
                         Some('\\') => { value.push('\\'); self.advance(); }
                         Some('"') => { value.push('"'); self.advance(); }
                         Some(c) => { value.push(c); self.advance(); }
@@ -291,6 +292,7 @@ impl<'a> Lexer<'a> {
                     Some('n') => { self.advance(); '\n' }
                     Some('t') => { self.advance(); '\t' }
                     Some('r') => { self.advance(); '\r' }
+                    Some('0') => { self.advance(); '\0' }
                     Some('\\') => { self.advance(); '\\' }
                     Some('\'') => { self.advance(); '\'' }
                     Some(c) => { self.advance(); c }

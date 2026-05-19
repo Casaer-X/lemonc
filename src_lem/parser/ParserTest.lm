@@ -1,0 +1,182 @@
+package lemon.parser;
+
+class TestResult {
+    public bool ok;
+}
+
+class ParserTest {
+    public static void main(String[] args) {
+        int passCount = 0;
+        int failCount = 0;
+
+        // Test 1: Basic class declaration parsing
+        System.printf("\n=== Test 1: Class Declaration ===\n");
+        String src1 = "class Foo { int x; void hello() { return; } }";
+        TestResult r1 = ParserTest.testParse("ClassDecl", src1);
+        if (r1.ok) { passCount = passCount + 1; } else { failCount = failCount + 1; }
+
+        // Test 2: Function declaration parsing
+        System.printf("\n=== Test 2: Function Declaration ===\n");
+        String src2 = "int add(int a, int b) { return a + b; }";
+        TestResult r2 = ParserTest.testParse("FuncDecl", src2);
+        if (r2.ok) { passCount = passCount + 1; } else { failCount = failCount + 1; }
+
+        // Test 3: Expression parsing (arithmetic, comparison, logical)
+        System.printf("\n=== Test 3: Expressions ===\n");
+        String src3 = "void test() { int a = 1 + 2 * 3; bool b = x > 0 && y < 10; bool c = a == b || c != d; }";
+        TestResult r3 = ParserTest.testParse("Expressions", src3);
+        if (r3.ok) { passCount = passCount + 1; } else { failCount = failCount + 1; }
+
+        // Test 4: Control flow (if/while/for)
+        System.printf("\n=== Test 4: Control Flow ===\n");
+        String src4 = "void ctrl() { if (x > 0) { x = x - 1; } else { x = 0; } while (x > 0) { x = x - 1; } for (int i = 0; i < 10; i = i + 1) { x = x + i; } }";
+        TestResult r4 = ParserTest.testParse("ControlFlow", src4);
+        if (r4.ok) { passCount = passCount + 1; } else { failCount = failCount + 1; }
+
+        // Test 5: Self-test — parse all .lm source files
+        System.printf("\n=== Test 5: Self-parse Test ===\n");
+        bool selfOk = true;
+        selfOk = ParserTest.selfParse("src_lem/lexer/Span.lm") && selfOk;
+        selfOk = ParserTest.selfParse("src_lem/lexer/TokenKind.lm") && selfOk;
+        selfOk = ParserTest.selfParse("src_lem/lexer/Token.lm") && selfOk;
+        selfOk = ParserTest.selfParse("src_lem/lexer/Lexer.lm") && selfOk;
+        selfOk = ParserTest.selfParse("src_lem/lexer/LexerTest.lm") && selfOk;
+        selfOk = ParserTest.selfParse("src_lem/parser/AST.lm") && selfOk;
+        selfOk = ParserTest.selfParse("src_lem/parser/Parser.lm") && selfOk;
+        selfOk = ParserTest.selfParse("src_lem/parser/ParserTest.lm") && selfOk;
+        if (selfOk) { passCount = passCount + 1; } else { failCount = failCount + 1; }
+
+        // Summary
+        System.printf("\n============================\n");
+        System.printf("Passed: %d  Failed: %d\n", passCount, failCount);
+        if (failCount == 0) {
+            System.printf("All tests passed!\n");
+        } else {
+            System.printf("Some tests FAILED!\n");
+        }
+    }
+
+    static bool selfParse(String path) {
+        String src = File.readAll(path);
+        if (src == null) {
+            System.printf("  %s: file not found\n", path);
+            return false;
+        }
+        Lexer lexer = new Lexer(src);
+        Array<Token> tokens = lexer.tokenize();
+        Parser parser = new Parser(tokens);
+        Program prog = parser.parse();
+        if (parser.hasErrors()) {
+            Array<String> errs = parser.getErrors();
+            System.printf("  %s: PARSE ERRORS (%d errors)\n", path, errs.size());
+            int i = 0;
+            while (i < errs.size()) {
+                System.printf("    %s\n", errs.get(i));
+                i = i + 1;
+            }
+            return false;
+        }
+        Array<Declaration> decls = prog.declarations;
+        // Count declaration types
+        int classCount = 0;
+        int ifaceCount = 0;
+        int enumCount = 0;
+        int funcCount = 0;
+        int varCount = 0;
+        int importCount = 0;
+        int pkgCount = 0;
+        int di = 0;
+        while (di < decls.size()) {
+            Declaration d = decls.get(di);
+            if (d.kind == DeclKind.Class) { classCount = classCount + 1; }
+            else if (d.kind == DeclKind.Interface) { ifaceCount = ifaceCount + 1; }
+            else if (d.kind == DeclKind.Enum) { enumCount = enumCount + 1; }
+            else if (d.kind == DeclKind.Function) { funcCount = funcCount + 1; }
+            else if (d.kind == DeclKind.Variable) { varCount = varCount + 1; }
+            else if (d.kind == DeclKind.Import) { importCount = importCount + 1; }
+            else if (d.kind == DeclKind.Package) { pkgCount = pkgCount + 1; }
+            di = di + 1;
+        }
+        System.printf("  %s: OK (%d decls: %d class, %d iface, %d enum, %d func, %d var, %d import, %d pkg)\n",
+            path, decls.size(), classCount, ifaceCount, enumCount, funcCount, varCount, importCount, pkgCount);
+        // Dump each declaration name and type
+        int dj = 0;
+        while (dj < decls.size()) {
+            Declaration d2 = decls.get(dj);
+            ParserTest.dumpDeclaration(d2, "    ");
+            dj = dj + 1;
+        }
+        return true;
+    }
+
+    static TestResult testParse(String name, String source) {
+        TestResult result = new TestResult();
+        Lexer lexer = new Lexer(source);
+        Array<Token> tokens = lexer.tokenize();
+        Parser parser = new Parser(tokens);
+        Program prog = parser.parse();
+
+        if (parser.hasErrors()) {
+            result.ok = false;
+            System.printf("  PARSE ERRORS:\n");
+            Array<String> errs = parser.getErrors();
+            int i = 0;
+            while (i < errs.size()) {
+                System.printf("    %s\n", errs.get(i));
+                i = i + 1;
+            }
+        } else {
+            result.ok = true;
+            Array<Declaration> decls = prog.declarations;
+            System.printf("  Parsed OK: %d declarations\n", decls.size());
+            ParserTest.dumpProgram(prog);
+        }
+
+        return result;
+    }
+
+    static void dumpProgram(Program prog) {
+        Array<Declaration> decls = prog.declarations;
+        int i = 0;
+        while (i < decls.size()) {
+            Declaration decl = decls.get(i);
+            ParserTest.dumpDeclaration(decl, "  ");
+            i = i + 1;
+        }
+    }
+
+    static void dumpDeclaration(Declaration decl, String indent) {
+        if (decl.kind == DeclKind.Class) {
+            System.printf("%sClass: %s\n", indent, decl.classDecl.name);
+            Array<ClassMember> members = decl.classDecl.members;
+            int i = 0;
+            while (i < members.size()) {
+                ClassMember m = members.get(i);
+                ParserTest.dumpClassMember(m, indent + "  ");
+                i = i + 1;
+            }
+        } else if (decl.kind == DeclKind.Function) {
+            System.printf("%sFunction: %s\n", indent, decl.functionDecl.name);
+        } else if (decl.kind == DeclKind.Package) {
+            System.printf("%sPackage: %s\n", indent, decl.packageDecl.name);
+        } else if (decl.kind == DeclKind.Import) {
+            System.printf("%sImport: %s\n", indent, decl.importDecl.path);
+        } else if (decl.kind == DeclKind.Interface) {
+            System.printf("%sInterface: %s\n", indent, decl.interfaceDecl.name);
+        } else if (decl.kind == DeclKind.Enum) {
+            System.printf("%sEnum: %s\n", indent, decl.enumDecl.name);
+        }
+    }
+
+    static void dumpClassMember(ClassMember m, String indent) {
+        if (m.kind == ClassMemberKind.Field) {
+            System.printf("%sField: %s\n", indent, m.field.name);
+        } else if (m.kind == ClassMemberKind.Method) {
+            System.printf("%sMethod: %s\n", indent, m.method.name);
+        } else if (m.kind == ClassMemberKind.Constructor) {
+            System.printf("%sConstructor: %s\n", indent, m.constructor.name);
+        } else if (m.kind == ClassMemberKind.Destructor) {
+            System.printf("%sDestructor: %s\n", indent, m.destructor.name);
+        }
+    }
+}

@@ -977,7 +977,7 @@ impl SemanticAnalyzer {
             name,
             "int" | "long" | "float" | "double" | "bool" | "void" | "byte" | "char" | "short" | "String" | "TypeInfo" | "Array" | "Map"
             | "List" | "Pair" | "Optional" | "Result" | "Set" | "Queue" | "Stack" | "HashMap" | "HashSet" | "LinkedList" | "Tuple"
-            | "System" | "StringBuilder" | "Character"
+            | "System" | "StringBuilder" | "Character" | "File"
         ) || self.enums.contains_key(name)
     }
 
@@ -1034,7 +1034,7 @@ impl SemanticAnalyzer {
                 "length" | "charAt" | "substring" | "indexOf" | "lastIndexOf" | "contains" | "startsWith" | "endsWith"
                 | "trim" | "toLowerCase" | "toUpperCase" | "replace" | "split" | "toInt" | "toDouble" | "toLong" | "toFloat" | "equals" | "compareTo"
                 | "concat" | "isEmpty" | "intToString" | "longToString" | "doubleToString" | "fromChar" | "fromCharArray"
-                | "toCharArray" | "toString"
+                | "toCharArray" | "toString" | "join"
             ),
             "Character" => matches!(
                 method_name,
@@ -1046,9 +1046,13 @@ impl SemanticAnalyzer {
                 "append" | "appendChar" | "appendInt" | "appendLong" | "appendDouble" | "appendBool"
                 | "toString" | "length" | "clear" | "capacity"
             ),
+            "File" => matches!(
+                method_name,
+                "readAll" | "writeAll" | "exists" | "delete"
+            ),
             "Array" => matches!(
                 method_name,
-                "size" | "length" | "add" | "get" | "set" | "removeAt" | "clear" | "contains" | "indexOf" | "isEmpty"
+                "size" | "length" | "add" | "push" | "get" | "set" | "removeAt" | "clear" | "contains" | "indexOf" | "isEmpty"
             ),
             "Map" | "HashMap" => matches!(
                 method_name,

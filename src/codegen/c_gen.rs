@@ -220,16 +220,15 @@ impl CCodeGen {
         self.emit_line("    r[len] = '\\0';");
         self.emit_line("    return r;");
         self.emit_line("}");
-        self.emit_line("char* String_substring(const char* s, int start, int end) {");
+        self.emit_line("char* String_substring(const char* s, int start, int length) {");
         self.emit_line("    if (!s) return NULL;");
         self.emit_line("    int slen = (int)strlen(s);");
         self.emit_line("    if (start < 0) start = 0;");
-        self.emit_line("    if (end > slen) end = slen;");
-        self.emit_line("    if (start >= end) return strdup(\"\");");
-        self.emit_line("    size_t len = end - start;");
-        self.emit_line("    char* r = (char*)malloc(len + 1);");
-        self.emit_line("    memcpy(r, s + start, len);");
-        self.emit_line("    r[len] = '\\0';");
+        self.emit_line("    if (start + length > slen) length = slen - start;");
+        self.emit_line("    if (length <= 0) return strdup(\"\");");
+        self.emit_line("    char* r = (char*)malloc(length + 1);");
+        self.emit_line("    memcpy(r, s + start, length);");
+        self.emit_line("    r[length] = '\\0';");
         self.emit_line("    return r;");
         self.emit_line("}");
         self.emit_line("int String_indexOf(const char* s, const char* sub) {");
@@ -260,6 +259,11 @@ impl CCodeGen {
         self.emit_line("    snprintf(buf, sizeof(buf), \"%d\", v);");
         self.emit_line("    return strdup(buf);");
         self.emit_line("}");
+        self.emit_line("char* String_longToString(int64_t v) {");
+        self.emit_line("    char buf[32];");
+        self.emit_line("    snprintf(buf, sizeof(buf), \"%I64d\", v);");
+        self.emit_line("    return strdup(buf);");
+        self.emit_line("}");
         self.emit_line("int32_t String_toInt(const char* s) {");
         self.emit_line("    if (!s) return 0;");
         self.emit_line("    return (int32_t)atoi(s);");
@@ -276,6 +280,18 @@ impl CCodeGen {
         self.emit_line("    char* r = (char*)malloc(32);");
         self.emit_line("    snprintf(r, 32, \"%g\", v);");
         self.emit_line("    return r;");
+        self.emit_line("}");
+        self.emit_line("char* File_readAll(const char* path) {");
+        self.emit_line("    FILE* f = fopen(path, \"rb\");");
+        self.emit_line("    if (!f) return NULL;");
+        self.emit_line("    fseek(f, 0, SEEK_END);");
+        self.emit_line("    long sz = ftell(f);");
+        self.emit_line("    fseek(f, 0, SEEK_SET);");
+        self.emit_line("    char* buf = (char*)malloc(sz + 1);");
+        self.emit_line("    size_t rd = fread(buf, 1, sz, f);");
+        self.emit_line("    buf[rd] = '\\0';");
+        self.emit_line("    fclose(f);");
+        self.emit_line("    return buf;");
         self.emit_line("}");
         self.emit_line("char* String_concat(const char* a, const char* b) {");
         self.emit_line("    if (!a && !b) return strdup(\"\");");
@@ -399,7 +415,7 @@ impl CCodeGen {
         self.emit_line("void File_close(LemonFile* lf) {");
         self.emit_line("    if (lf && lf->handle) { fclose(lf->handle); lf->handle = NULL; }");
         self.emit_line("}");
-        self.emit_line("const char* File_readAll(LemonFile* lf) {");
+        self.emit_line("const char* LemonFile_readAll(LemonFile* lf) {");
         self.emit_line("    if (!lf || !lf->handle) return strdup(\"\");");
         self.emit_line("    fseek(lf->handle, 0, SEEK_END);");
         self.emit_line("    long sz = ftell(lf->handle);");
@@ -536,18 +552,21 @@ impl CCodeGen {
         self.emit_line("");
         self.emit_line("void LemonArray_add(LemonArray* arr, void* elem) {");
         self.emit_line("    LemonArray_ensureCapacity(arr, arr->length + 1);");
-        self.emit_line("    memcpy((char*)arr->data + arr->length * arr->elem_size, elem, arr->elem_size);");
+        self.emit_line("    memcpy((char*)arr->data + arr->length * arr->elem_size, &elem, arr->elem_size);");
         self.emit_line("    arr->length++;");
         self.emit_line("}");
+        self.emit_line("void LemonArray_push(LemonArray* arr, void* elem) { LemonArray_add(arr, elem); }");
         self.emit_line("");
         self.emit_line("void* LemonArray_get(LemonArray* arr, int32_t index) {");
         self.emit_line("    if (index < 0 || index >= arr->length) return NULL;");
-        self.emit_line("    return (char*)arr->data + index * arr->elem_size;");
+        self.emit_line("    void* result;");
+        self.emit_line("    memcpy(&result, (char*)arr->data + index * arr->elem_size, arr->elem_size);");
+        self.emit_line("    return result;");
         self.emit_line("}");
         self.emit_line("");
         self.emit_line("void LemonArray_set(LemonArray* arr, int32_t index, void* elem) {");
         self.emit_line("    if (index < 0 || index >= arr->length) return;");
-        self.emit_line("    memcpy((char*)arr->data + index * arr->elem_size, elem, arr->elem_size);");
+        self.emit_line("    memcpy((char*)arr->data + index * arr->elem_size, &elem, arr->elem_size);");
         self.emit_line("}");
         self.emit_line("");
         self.emit_line("int32_t LemonArray_size(LemonArray* arr) { return arr ? arr->length : 0; }");
@@ -558,6 +577,31 @@ impl CCodeGen {
         self.emit_line("            (char*)arr->data + (index + 1) * arr->elem_size,");
         self.emit_line("            (arr->length - index - 1) * arr->elem_size);");
         self.emit_line("    arr->length--;");
+        self.emit_line("}");
+        self.emit_line("");
+        self.emit_line("char* String_join(LemonArray* arr, const char* sep) {");
+        self.emit_line("    if (!arr || arr->length == 0) return strdup(\"\");");
+        self.emit_line("    if (!sep) sep = \"\";");
+        self.emit_line("    int32_t sep_len = (int32_t)strlen(sep);");
+        self.emit_line("    int32_t total = 0;");
+        self.emit_line("    for (int32_t i = 0; i < arr->length; i++) {");
+        self.emit_line("        void* elem = LemonArray_get(arr, i);");
+        self.emit_line("        const char* s = elem ? (const char*)elem : \"\";");
+        self.emit_line("        total += (int32_t)strlen(s);");
+        self.emit_line("        if (i > 0) total += sep_len;");
+        self.emit_line("    }");
+        self.emit_line("    char* r = (char*)malloc(total + 1);");
+        self.emit_line("    r[0] = '\\0';");
+        self.emit_line("    char* p = r;");
+        self.emit_line("    for (int32_t i = 0; i < arr->length; i++) {");
+        self.emit_line("        void* elem = LemonArray_get(arr, i);");
+        self.emit_line("        const char* s = elem ? (const char*)elem : \"\";");
+        self.emit_line("        if (i > 0 && sep_len > 0) { memcpy(p, sep, sep_len); p += sep_len; }");
+        self.emit_line("        int32_t slen = (int32_t)strlen(s);");
+        self.emit_line("        memcpy(p, s, slen); p += slen;");
+        self.emit_line("    }");
+        self.emit_line("    *p = '\\0';");
+        self.emit_line("    return r;");
         self.emit_line("}");
         self.emit_line("");
 
@@ -1181,6 +1225,11 @@ impl CCodeGen {
         for p in &ctor.params {
             self.var_types.insert(p.name.clone(), self.c_type(&p.param_type));
         }
+        for member in &class.members {
+            if let ClassMember::Field(field) = member {
+                self.var_types.insert(field.name.clone(), self.c_type(&field.var_type));
+            }
+        }
 
         for stmt in &ctor.body.statements {
             self.generate_stmt(stmt);
@@ -1209,6 +1258,12 @@ impl CCodeGen {
         for p in &method.params {
             self.var_types.insert(p.name.clone(), self.c_type(&p.param_type));
         }
+        // Add class field types for string type detection in expressions
+        for member in &class.members {
+            if let ClassMember::Field(field) = member {
+                self.var_types.insert(field.name.clone(), self.c_type(&field.var_type));
+            }
+        }
 
         if let Some(body) = &method.body {
             for stmt in &body.statements {
@@ -1234,6 +1289,12 @@ impl CCodeGen {
         self.var_types.insert("self".to_string(), format!("{}*", class.name));
         for p in &method.params {
             self.var_types.insert(p.name.clone(), self.c_type(&p.param_type));
+        }
+        // Add class field types for string type detection in expressions
+        for member in &class.members {
+            if let ClassMember::Field(field) = member {
+                self.var_types.insert(field.name.clone(), self.c_type(&field.var_type));
+            }
         }
 
         if let Some(body) = &method.body {
@@ -1634,7 +1695,7 @@ impl CCodeGen {
                                 return format!("{}({})", method, arg_strs.join(", "));
                             }
                             if Self::is_simple_builtin_type(var_name) {
-                                return format!("{}_{}({})", var_name, method, arg_strs.join(", "));
+                                return Self::gen_builtin_type_method_call(var_name, method, &arg_strs);
                             }
                         }
 
@@ -1687,7 +1748,7 @@ impl CCodeGen {
                     }
                     if Self::is_simple_builtin_type(var_name) {
                         let arg_strs: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
-                        return format!("{}_{}({})", var_name, method, arg_strs.join(", "));
+                        return Self::gen_builtin_type_method_call(var_name, method, &arg_strs);
                     }
                 }
 
@@ -1726,6 +1787,10 @@ impl CCodeGen {
                         return format!("{}_KIND_{}", var_name, field);
                     }
                     if Self::is_simple_builtin_type(var_name) {
+                        // Array/Map don't have static fields, but String/File etc do
+                        if var_name == "Array" || var_name == "Map" {
+                            return format!("LemonArray_{}", field);
+                        }
                         return format!("{}_{}", var_name, field);
                     }
                     if self.class_fields.contains_key(var_name) {
@@ -1739,18 +1804,20 @@ impl CCodeGen {
             }
             Expr::New(class_name, type_args, args) => {
                 let arg_strs: Vec<String> = args.iter().map(|a| self.gen_expr(a)).collect();
-                if !type_args.is_empty() {
-                    let mangled = self.mangled_generic_name(class_name, type_args);
-                    let args_part = if arg_strs.is_empty() { String::new() } else { format!(", {}", arg_strs.join(", ")) };
-                    format!("{}_ctor(malloc(sizeof({})){})", mangled, mangled, args_part)
-                } else {
-                    match class_name.as_str() {
-                        "Array" => {
-                            let elem_size = if arg_strs.is_empty() { "sizeof(void*)" } else { &arg_strs[0] };
-                            format!("LemonArray_new({})", elem_size)
-                        }
-                        "Map" => "LemonMap_new()".to_string(),
-                        _ => {
+                // Built-in types should use their special paths regardless of type_args
+                match class_name.as_str() {
+                    "Array" => {
+                        let elem_size = if arg_strs.is_empty() { "sizeof(void*)" } else { &arg_strs[0] };
+                        format!("LemonArray_new({})", elem_size)
+                    }
+                    "Map" => "LemonMap_new()".to_string(),
+                    "StringBuilder" => "StringBuilder_new()".to_string(),
+                    _ => {
+                        if !type_args.is_empty() {
+                            let mangled = self.mangled_generic_name(class_name, type_args);
+                            let args_part = if arg_strs.is_empty() { String::new() } else { format!(", {}", arg_strs.join(", ")) };
+                            format!("{}_ctor(malloc(sizeof({})){})", mangled, mangled, args_part)
+                        } else {
                             let args_part = if arg_strs.is_empty() { String::new() } else { format!(", {}", arg_strs.join(", ")) };
                             format!("{}_ctor(malloc(sizeof({})){})", class_name, class_name, args_part)
                         }
@@ -1807,8 +1874,16 @@ impl CCodeGen {
     fn is_simple_builtin_type(name: &str) -> bool {
         matches!(
             name,
-            "String" | "StringBuilder" | "Character"
+            "String" | "StringBuilder" | "Character" | "File" | "Array" | "Map"
         )
+    }
+
+    fn gen_builtin_type_method_call(type_name: &str, method: &str, args: &[String]) -> String {
+        match type_name {
+            "Array" => format!("LemonArray_{}({})", method, args.join(", ")),
+            "Map" => format!("LemonMap_{}({})", method, args.join(", ")),
+            _ => format!("{}_{}({})", type_name, method, args.join(", ")),
+        }
     }
 
     fn infer_class_from_expr(&self, expr: &Expr) -> Option<String> {
@@ -1816,7 +1891,41 @@ impl CCodeGen {
             Expr::This => self.current_class.clone(),
             Expr::Super => self.parent_class.clone().or(self.current_class.clone()),
             Expr::Variable(name) => self.resolve_class_for_var(name),
-            Expr::FieldAccess(obj, _field) => self.infer_class_from_expr(obj),
+            Expr::FieldAccess(obj, field) => {
+                // Check if the field itself has a known type
+                if let Some(ty) = self.var_types.get(field) {
+                    if ty == "LemonArray*" {
+                        return Some("LemonArray".to_string());
+                    }
+                    if ty == "LemonMap*" {
+                        return Some("LemonMap".to_string());
+                    }
+                    if ty == "StringBuilder*" {
+                        return Some("StringBuilder".to_string());
+                    }
+                    if ty == "char*" || ty == "const char*" {
+                        return Some("String".to_string());
+                    }
+                    if ty == "LemonFile*" {
+                        return Some("LemonFile".to_string());
+                    }
+                    // Check for class pointer types
+                    if ty.ends_with('*') {
+                        let class_name = &ty[..ty.len() - 1];
+                        if !class_name.is_empty() && !class_name.starts_with("const ") {
+                            return Some(class_name.to_string());
+                        }
+                        let clean = ty.trim_start_matches("const ");
+                        if clean.ends_with('*') {
+                            let cn = &clean[..clean.len() - 1];
+                            if !cn.is_empty() {
+                                return Some(cn.to_string());
+                            }
+                        }
+                    }
+                }
+                self.infer_class_from_expr(obj)
+            }
             Expr::New(class_name, type_args, _) => {
                 if !type_args.is_empty() {
                     Some(self.mangled_generic_name(class_name, type_args))
@@ -1830,6 +1939,26 @@ impl CCodeGen {
                 } else {
                     None
                 }
+            }
+            Expr::Call(callee, _args) => {
+                // Try to infer the return type of a method call
+                if let Expr::FieldAccess(obj, method) = callee.as_ref() {
+                    // Check if this is a method that returns a known type
+                    if method == "getErrors" || method == "getErrors" {
+                        return Some("LemonArray".to_string());
+                    }
+                    // Check if calling a method on a known builtin type
+                    let obj_class = self.infer_class_from_expr(obj);
+                    if let Some(cn) = &obj_class {
+                        if cn == "LemonArray" {
+                            // Array methods that return Array
+                            if method == "keys" || method == "values" {
+                                return Some("LemonArray".to_string());
+                            }
+                        }
+                    }
+                }
+                None
             }
             _ => None,
         }
@@ -2939,17 +3068,25 @@ impl CCodeGen {
             }
             Expr::MethodCall(obj, method, _) => {
                 let is_string_method = matches!(method.as_str(),
-                    "substring" | "toUpperCase" | "toLowerCase" | "trim" | "replace" | "concat" | "intToString"
+                    "substring" | "toUpperCase" | "toLowerCase" | "trim" | "replace" | "concat" | "intToString" | "longToString" | "doubleToString" | "fromChar" | "fromCharArray" | "join"
                 );
                 if is_string_method {
                     return true;
                 }
                 self.expr_is_string_type(obj)
             }
-            Expr::FieldAccess(obj, _) => self.expr_is_string_type(obj),
+            Expr::FieldAccess(obj, field) => {
+                // Check if the field itself is a string type
+                if let Some(ty) = self.var_types.get(field) {
+                    if ty.contains("char*") || ty.contains("const char*") {
+                        return true;
+                    }
+                }
+                self.expr_is_string_type(obj)
+            }
             Expr::Call(callee, _) => {
                 if let Expr::FieldAccess(obj, method) = callee.as_ref() {
-                    if method == "intToString" || method == "toString" {
+                    if method == "intToString" || method == "longToString" || method == "doubleToString" || method == "toString" || method == "fromChar" || method == "fromCharArray" || method == "join" {
                         return true;
                     }
                     let _ = obj;
@@ -2967,11 +3104,33 @@ impl CCodeGen {
         if left_is_string && right_is_string {
             format!("String_concat({}, {})", l, r)
         } else if left_is_string && !right_is_string {
-            format!("String_concat({}, String_intToString((int32_t){}))", l, r)
+            format!("String_concat({}, {})", l, self.to_string_expr(right, r))
         } else if !left_is_string && right_is_string {
-            format!("String_concat(String_intToString((int32_t){}), {})", l, r)
+            format!("String_concat({}, {})", self.to_string_expr(left, l), r)
         } else {
             format!("String_concat({}, {})", l, r)
+        }
+    }
+
+    fn to_string_expr(&self, expr: &Expr, c_expr: String) -> String {
+        match expr {
+            Expr::IntegerLiteral(_) => format!("String_longToString((int64_t){})", c_expr),
+            Expr::FloatLiteral(_) => format!("String_doubleToString((double){})", c_expr),
+            Expr::BoolLiteral(_) => format!("String_intToString((int32_t){})", c_expr),
+            Expr::Variable(name) => {
+                if let Some(ty) = self.var_types.get(name) {
+                    if ty == "int64_t" || ty == "long" {
+                        format!("String_longToString((int64_t){})", c_expr)
+                    } else if ty == "double" || ty == "float" {
+                        format!("String_doubleToString((double){})", c_expr)
+                    } else {
+                        format!("String_intToString((int32_t){})", c_expr)
+                    }
+                } else {
+                    format!("String_intToString((int32_t){})", c_expr)
+                }
+            }
+            _ => format!("String_intToString((int32_t){})", c_expr),
         }
     }
 }

@@ -1,0 +1,1782 @@
+package lemon.parser;
+
+// ============================================================
+// Lemon Language 语法分析器
+// 基于 lemonc/src/parser/parser.rs 的 Rust 实现
+// 使用 Pratt 解析器处理表达式优先级
+// ============================================================
+
+class Parser {
+    public Array<Token> tokens;
+    public int pos;
+    public Array<String> errors;
+
+    public Parser(Array<Token> tokens) {
+        this.tokens = tokens;
+        this.pos = 0;
+        this.errors = new Array<String>();
+    }
+
+    // ============================================================
+    // 公共接口
+    // ============================================================
+
+    public Program parse() {
+        Array<Declaration> decls = this.parseProgram();
+        return new Program(decls);
+    }
+
+    public bool hasErrors() {
+        return this.errors.size() > 0;
+    }
+
+    public Array<String> getErrors() {
+        return this.errors;
+    }
+
+    // ============================================================
+    // Token 操作
+    // ============================================================
+
+    public Token peek() {
+        if (this.pos >= this.tokens.size()) {
+            return null;
+        }
+        return this.tokens.get(this.pos);
+    }
+
+    public int peekKind() {
+        Token tok = this.peek();
+        if (tok == null) {
+            return -1;
+        }
+        return tok.kind;
+    }
+
+    public Token advance() {
+        if (this.pos >= this.tokens.size()) {
+            return null;
+        }
+        Token tok = this.tokens.get(this.pos);
+        this.pos = this.pos + 1;
+        return tok;
+    }
+
+    public Token expect(int kind) {
+        Token tok = this.advance();
+        if (tok == null) {
+            String msg = "Unexpected end of input, expected " + TokenKind.toString(kind);
+            this.errors.push(msg);
+            return null;
+        }
+        if (tok.kind != kind) {
+            String msg = "Expected " + TokenKind.toString(kind) + ", found "
+                + TokenKind.toString(tok.kind) + " at line "
+                + String.intToString(tok.span.line) + " col "
+                + String.intToString(tok.span.column);
+            this.errors.push(msg);
+            return null;
+        }
+        return tok;
+    }
+
+    public bool matchToken(int kind) {
+        if (this.peekKind() == kind) {
+            this.advance();
+            return true;
+        }
+        return false;
+    }
+
+    public bool isAtEnd() {
+        return this.pos >= this.tokens.size();
+    }
+
+    public bool checkKind(int kind) {
+        return this.peekKind() == kind;
+    }
+
+    // ============================================================
+    // 程序入口
+    // ============================================================
+
+    public Array<Declaration> parseProgram() {
+        Array<Declaration> decls = new Array<Declaration>();
+
+        if (this.checkKind(TokenKind.Package)) {
+            PackageDecl pkg = this.parsePackageDecl();
+            decls.push(Declaration.makePackage(pkg));
+        }
+
+        while (this.checkKind(TokenKind.Import)) {
+            ImportDecl import_ = this.parseImportDecl();
+            decls.push(Declaration.makeImport(import_));
+        }
+
+        while (!this.isAtEnd()) {
+            Declaration decl = this.parseDeclaration();
+            if (decl != null) {
+                decls.push(decl);
+            } else {
+                this.advance();
+            }
+        }
+
+        return decls;
+    }
+
+    // ============================================================
+    // 包/导入
+    // ============================================================
+
+    public PackageDecl parsePackageDecl() {
+        this.expect(TokenKind.Package);
+        String name = this.parsePackageName();
+        this.expect(TokenKind.Semicolon);
+        return new PackageDecl(name);
+    }
+
+    public String parsePackageName() {
+        Array<String> parts = new Array<String>();
+
+        while (!this.isAtEnd()) {
+            int kind = this.peekKind();
+            if (kind == TokenKind.Identifier) {
+                Token tok = this.advance();
+                parts.push(tok.strValue);
+            } else if (kind == TokenKind.Dot) {
+                this.advance();
+            } else {
+                break;
+            }
+        }
+
+        return String.join(parts, ".");
+    }
+
+    public ImportDecl parseImportDecl() {
+        this.expect(TokenKind.Import);
+        String path = this.parseImportPath();
+        String alias = null;
+        if (this.matchToken(TokenKind.As)) {
+            Token nameTok = this.expect(TokenKind.Identifier);
+            if (nameTok != null) {
+                alias = nameTok.strValue;
+            } else {
+                alias = "";
+            }
+        }
+        this.expect(TokenKind.Semicolon);
+        return new ImportDecl(path, alias);
+    }
+
+    public String parseImportPath() {
+        Array<String> parts = new Array<String>();
+
+        while (!this.isAtEnd()) {
+            int kind = this.peekKind();
+            if (kind == TokenKind.Identifier) {
+                Token tok = this.advance();
+                parts.push(tok.strValue);
+            } else if (kind == TokenKind.Dot) {
+                this.advance();
+            } else if (kind == TokenKind.Star) {
+                this.advance();
+                parts.push("*");
+                break;
+            } else {
+                break;
+            }
+        }
+
+        return String.join(parts, ".");
+    }
+
+    // ============================================================
+    // 声明分发
+    // ============================================================
+
+    public Declaration parseDeclaration() {
+        int lookahead = this.pos;
+        while (lookahead < this.tokens.size()) {
+            Token laTok = this.tokens.get(lookahead);
+            int kind = laTok.kind;
+            if (kind == TokenKind.At) {
+                lookahead = lookahead + 2;
+            } else if (kind == TokenKind.Public || kind == TokenKind.Private
+                    || kind == TokenKind.Abstract || kind == TokenKind.Final
+                    || kind == TokenKind.Static || kind == TokenKind.Virtual
+                    || kind == TokenKind.Override || kind == TokenKind.Reflectable) {
+                lookahead = lookahead + 1;
+            } else {
+                break;
+            }
+        }
+
+        if (lookahead < this.tokens.size()) {
+            Token laTok2 = this.tokens.get(lookahead);
+            int kind = laTok2.kind;
+            if (kind == TokenKind.Class) {
+                ClassDecl class_ = this.parseClassDecl();
+                return Declaration.makeClass(class_);
+            }
+            if (kind == TokenKind.Interface) {
+                InterfaceDecl iface = this.parseInterfaceDecl();
+                return Declaration.makeInterface(iface);
+            }
+            if (kind == TokenKind.Enum) {
+                EnumDecl enum_ = this.parseEnumDecl();
+                return Declaration.makeEnum(enum_);
+            }
+        }
+
+        FunctionDecl func = this.parseFunctionDecl();
+        if (func != null) {
+            return Declaration.makeFunction(func);
+        }
+        return null;
+    }
+
+    // ============================================================
+    // 类声明
+    // ============================================================
+
+    public ClassDecl parseClassDecl() {
+        Array<int> modifiers = this.parseClassModifiers();
+        this.expect(TokenKind.Class);
+
+        Token nameTok = this.expect(TokenKind.Identifier);
+        String name = "";
+        if (nameTok != null) {
+            name = nameTok.strValue;
+        }
+
+        Array<TypeParam> typeParams = new Array<TypeParam>();
+        if (this.peekKind() == TokenKind.Lt) {
+            typeParams = this.parseTypeParams();
+        }
+
+        TypeRef extends_ = null;
+        if (this.matchToken(TokenKind.Extends)) {
+            extends_ = this.parseTypeRef();
+        }
+
+        Array<TypeRef> implements_ = new Array<TypeRef>();
+        if (this.matchToken(TokenKind.Implements)) {
+            implements_.push(this.parseTypeRef());
+            while (this.matchToken(TokenKind.Comma)) {
+                implements_.push(this.parseTypeRef());
+            }
+        }
+
+        Array<ClassMember> members = new Array<ClassMember>();
+        if (this.matchToken(TokenKind.LeftBrace)) {
+            while (!this.checkKind(TokenKind.RightBrace) && !this.isAtEnd()) {
+                ClassMember member = this.parseClassMember();
+                if (member != null) {
+                    members.push(member);
+                } else {
+                    this.advance();
+                }
+            }
+            this.expect(TokenKind.RightBrace);
+        }
+
+        return new ClassDecl(name, modifiers, typeParams, extends_, implements_, members);
+    }
+
+    public Array<int> parseClassModifiers() {
+        Array<int> modifiers = new Array<int>();
+
+        while (true) {
+            int kind = this.peekKind();
+            if (kind == TokenKind.Public) {
+                modifiers.push(ClassModifier.Public);
+                this.advance();
+            } else if (kind == TokenKind.Private) {
+                modifiers.push(ClassModifier.Private);
+                this.advance();
+            } else if (kind == TokenKind.Abstract) {
+                modifiers.push(ClassModifier.Abstract);
+                this.advance();
+            } else if (kind == TokenKind.Final) {
+                modifiers.push(ClassModifier.Final);
+                this.advance();
+            } else if (kind == TokenKind.Reflectable) {
+                modifiers.push(ClassModifier.Reflectable);
+                this.advance();
+            } else if (kind == TokenKind.At) {
+                this.parseAnnotation();
+            } else {
+                break;
+            }
+        }
+
+        return modifiers;
+    }
+
+    // ============================================================
+    // 接口声明
+    // ============================================================
+
+    public InterfaceDecl parseInterfaceDecl() {
+        this.expect(TokenKind.Interface);
+
+        Token nameTok = this.expect(TokenKind.Identifier);
+        String name = "";
+        if (nameTok != null) {
+            name = nameTok.strValue;
+        }
+
+        Array<TypeParam> typeParams = new Array<TypeParam>();
+        if (this.peekKind() == TokenKind.Lt) {
+            typeParams = this.parseTypeParams();
+        }
+
+        Array<TypeRef> extends_ = new Array<TypeRef>();
+        if (this.matchToken(TokenKind.Extends)) {
+            extends_.push(this.parseTypeRef());
+            while (this.matchToken(TokenKind.Comma)) {
+                extends_.push(this.parseTypeRef());
+            }
+        }
+
+        Array<InterfaceMember> members = new Array<InterfaceMember>();
+        if (this.matchToken(TokenKind.LeftBrace)) {
+            while (!this.checkKind(TokenKind.RightBrace) && !this.isAtEnd()) {
+                InterfaceMember member = this.parseInterfaceMember();
+                if (member != null) {
+                    members.push(member);
+                } else {
+                    this.advance();
+                }
+            }
+            this.expect(TokenKind.RightBrace);
+        }
+
+        return new InterfaceDecl(name, typeParams, extends_, members);
+    }
+
+    public InterfaceMember parseInterfaceMember() {
+        TypeRef returnType = this.parseTypeRef();
+        Token nameTok = this.expect(TokenKind.Identifier);
+        if (nameTok == null) {
+            return null;
+        }
+        String name = nameTok.strValue;
+
+        this.expect(TokenKind.LeftParen);
+        Array<Param> params = this.parseParams();
+        this.expect(TokenKind.RightParen);
+        this.expect(TokenKind.Semicolon);
+
+        MethodSignature sig = new MethodSignature(returnType, name, params);
+        return InterfaceMember.makeMethodSignature(sig);
+    }
+
+    // ============================================================
+    // 枚举声明
+    // ============================================================
+
+    public EnumDecl parseEnumDecl() {
+        Array<int> modifiers = this.parseClassModifiers();
+        this.expect(TokenKind.Enum);
+
+        Token nameTok = this.expect(TokenKind.Identifier);
+        String name = "";
+        if (nameTok != null) {
+            name = nameTok.strValue;
+        }
+
+        Array<TypeParam> typeParams = new Array<TypeParam>();
+        if (this.peekKind() == TokenKind.Lt) {
+            typeParams = this.parseTypeParams();
+        }
+
+        this.expect(TokenKind.LeftBrace);
+        Array<EnumVariant> variants = new Array<EnumVariant>();
+        while (!this.checkKind(TokenKind.RightBrace) && !this.isAtEnd()) {
+            EnumVariant variant = this.parseEnumVariant();
+            if (variant != null) {
+                variants.push(variant);
+                if (!this.matchToken(TokenKind.Comma)) {
+                    break;
+                }
+            } else {
+                this.advance();
+            }
+        }
+        this.expect(TokenKind.RightBrace);
+
+        return new EnumDecl(name, typeParams, variants, modifiers);
+    }
+
+    public EnumVariant parseEnumVariant() {
+        Token nameTok = this.expect(TokenKind.Identifier);
+        if (nameTok == null) {
+            return null;
+        }
+        String name = nameTok.strValue;
+
+        Array<EnumVariantField> fields = new Array<EnumVariantField>();
+        if (this.peekKind() == TokenKind.LeftParen) {
+            this.advance();
+            fields = this.parseEnumVariantFields();
+        }
+
+        return new EnumVariant(name, fields);
+    }
+
+    public Array<EnumVariantField> parseEnumVariantFields() {
+        Array<EnumVariantField> fields = new Array<EnumVariantField>();
+        while (!this.checkKind(TokenKind.RightParen) && !this.isAtEnd()) {
+            TypeRef fieldType = this.parseTypeRef();
+            String fieldName = null;
+            if (this.peekKind() == TokenKind.Identifier
+                && !this.isNextTokenColonOrCommaOrParen()) {
+                Token nameTok = this.expect(TokenKind.Identifier);
+                if (nameTok != null) {
+                    fieldName = nameTok.strValue;
+                }
+            }
+            fields.push(new EnumVariantField(fieldType, fieldName));
+            if (!this.matchToken(TokenKind.Comma)) {
+                break;
+            }
+        }
+        this.expect(TokenKind.RightParen);
+        return fields;
+    }
+
+    public bool isNextTokenColonOrCommaOrParen() {
+        int kind = this.peekKind();
+        return kind == TokenKind.Colon || kind == TokenKind.Comma || kind == TokenKind.RightParen;
+    }
+
+    // ============================================================
+    // 函数声明
+    // ============================================================
+
+    public FunctionDecl parseFunctionDecl() {
+        Array<int> modifiers = this.parseMethodModifiers();
+
+        TypeRef returnType = this.parseTypeRef();
+
+        if (this.peekKind() != TokenKind.Identifier) {
+            return null;
+        }
+
+        Token nameTok = this.advance();
+        String name = nameTok.strValue;
+
+        this.expect(TokenKind.LeftParen);
+        Array<Param> params = this.parseParams();
+        this.expect(TokenKind.RightParen);
+
+        Block body = this.parseBlock();
+
+        return new FunctionDecl(returnType, name, params, body, modifiers);
+    }
+
+    public Array<int> parseMethodModifiers() {
+        Array<int> modifiers = new Array<int>();
+
+        while (true) {
+            int kind = this.peekKind();
+            if (kind == TokenKind.Public) {
+                modifiers.push(MethodModifier.Public);
+                this.advance();
+            } else if (kind == TokenKind.Private) {
+                modifiers.push(MethodModifier.Private);
+                this.advance();
+            } else if (kind == TokenKind.Static) {
+                modifiers.push(MethodModifier.Static);
+                this.advance();
+            } else if (kind == TokenKind.Virtual) {
+                modifiers.push(MethodModifier.Virtual);
+                this.advance();
+            } else if (kind == TokenKind.Override) {
+                modifiers.push(MethodModifier.Override);
+                this.advance();
+            } else if (kind == TokenKind.Final) {
+                modifiers.push(MethodModifier.Final);
+                this.advance();
+            } else if (kind == TokenKind.Abstract) {
+                modifiers.push(MethodModifier.Abstract);
+                this.advance();
+            } else {
+                break;
+            }
+        }
+
+        return modifiers;
+    }
+
+    // ============================================================
+    // 类成员
+    // ============================================================
+
+    public ClassMember parseClassMember() {
+        while (this.checkKind(TokenKind.At)) {
+            this.parseAnnotation();
+        }
+
+        Array<int> modifiers = this.parseMethodModifiers();
+
+        while (this.checkKind(TokenKind.At)) {
+            this.parseAnnotation();
+        }
+
+        if (this.checkKind(TokenKind.Tilde)) {
+            return ClassMember.makeDestructor(this.parseDestructorDecl());
+        }
+
+        if (!this.isTypeToken()) {
+            return null;
+        }
+
+        int savedPos = this.pos;
+        TypeRef returnType = this.parseTypeRef();
+
+        if (this.peekKind() == TokenKind.LeftParen) {
+            // 构造函数形式：TypeRef 名即方法名
+            String name = this.typeRefToName(returnType);
+            this.advance();
+            Array<Param> params = this.parseParams();
+            this.expect(TokenKind.RightParen);
+            Block body = null;
+            if (this.peekKind() == TokenKind.LeftBrace) {
+                body = this.parseBlock();
+            } else {
+                this.expect(TokenKind.Semicolon);
+            }
+            return ClassMember.makeMethod(new MethodDecl(returnType, name, params, body, modifiers));
+        }
+
+        if (this.peekKind() != TokenKind.Identifier) {
+            this.pos = savedPos;
+            return null;
+        }
+
+        Token nameTok = this.advance();
+        String name = nameTok.strValue;
+
+        if (name == "this") {
+            this.expect(TokenKind.LeftParen);
+            Array<Param> params = this.parseParams();
+            this.expect(TokenKind.RightParen);
+            Block body = this.parseBlock();
+            return ClassMember.makeConstructor(new ConstructorDecl("this", params, body));
+        }
+
+        if (this.peekKind() == TokenKind.LeftParen) {
+            this.advance();
+            Array<Param> params = this.parseParams();
+            this.expect(TokenKind.RightParen);
+            Block body = null;
+            if (this.peekKind() == TokenKind.LeftBrace) {
+                body = this.parseBlock();
+            } else {
+                this.expect(TokenKind.Semicolon);
+            }
+            return ClassMember.makeMethod(new MethodDecl(returnType, name, params, body, modifiers));
+        } else {
+            Expr initializer = null;
+            if (this.matchToken(TokenKind.Assign)) {
+                initializer = this.parseExpression();
+            }
+            this.expect(TokenKind.Semicolon);
+            Array<int> varMods = this.methodModsToVarMods(modifiers);
+            return ClassMember.makeField(new VarDecl(returnType, name, initializer, varMods));
+        }
+    }
+
+    public DestructorDecl parseDestructorDecl() {
+        this.expect(TokenKind.Tilde);
+        Token nameTok = this.expect(TokenKind.Identifier);
+        String name = "";
+        if (nameTok != null) {
+            name = nameTok.strValue;
+        }
+        this.expect(TokenKind.LeftParen);
+        this.expect(TokenKind.RightParen);
+        Block body = this.parseBlock();
+        return new DestructorDecl(name, body);
+    }
+
+    // ============================================================
+    // 参数解析
+    // ============================================================
+
+    public Array<Param> parseParams() {
+        if (this.peekKind() == TokenKind.RightParen) {
+            return new Array<Param>();
+        }
+
+        Array<Param> params = new Array<Param>();
+        while (true) {
+            TypeRef paramType = this.parseTypeRef();
+            Token nameTok = this.expect(TokenKind.Identifier);
+            if (nameTok == null) {
+                break;
+            }
+            String name = nameTok.strValue;
+
+            Expr defaultValue = null;
+            if (this.matchToken(TokenKind.Assign)) {
+                defaultValue = this.parseExpression();
+            }
+
+            params.push(new Param(paramType, name, defaultValue));
+
+            if (!this.matchToken(TokenKind.Comma)) {
+                break;
+            }
+        }
+
+        return params;
+    }
+
+    // ============================================================
+    // 类型解析
+    // ============================================================
+
+    public bool isTypeToken() {
+        if (this.isAtEnd()) {
+            return false;
+        }
+        int kind = this.peekKind();
+        return kind == TokenKind.Identifier
+            || kind == TokenKind.Void
+            || kind == TokenKind.Bool
+            || kind == TokenKind.Byte
+            || kind == TokenKind.Char
+            || kind == TokenKind.Short
+            || kind == TokenKind.Int
+            || kind == TokenKind.Long
+            || kind == TokenKind.Float
+            || kind == TokenKind.Double;
+    }
+
+    public TypeRef parseTypeRef() {
+        TypeRef primitive = this.parsePrimitiveType();
+        if (primitive != null) {
+            return primitive;
+        }
+
+        if (this.peekKind() == TokenKind.Identifier) {
+            Token nameTok = this.advance();
+            String name = nameTok.strValue;
+
+            Array<TypeRef> typeArgs = new Array<TypeRef>();
+            if (this.peekKind() == TokenKind.Lt) {
+                typeArgs = this.parseTypeArgs();
+            }
+
+            TypeRef base = TypeRef.makeNamed(name, typeArgs);
+
+            while (this.matchToken(TokenKind.Star)) {
+                base = TypeRef.makeArray(base);
+            }
+
+            while (this.matchToken(TokenKind.LeftBracket)) {
+                this.expect(TokenKind.RightBracket);
+                base = TypeRef.makeArray(base);
+            }
+
+            if (this.peekKind() == TokenKind.Arrow) {
+                this.expect(TokenKind.Arrow);
+                this.expect(TokenKind.LeftParen);
+                Array<TypeRef> paramTypes = this.parseTypeList();
+                this.expect(TokenKind.RightParen);
+                TypeRef retType = this.parseTypeRef();
+                return TypeRef.makeFunctionPtr(retType, paramTypes);
+            }
+
+            return base;
+        }
+
+        return TypeRef.makePrimitive(PrimitiveType.Void);
+    }
+
+    public TypeRef parsePrimitiveType() {
+        int primKind = -1;
+        int kind = this.peekKind();
+
+        if (kind == TokenKind.Void) {
+            primKind = PrimitiveType.Void;
+        } else if (kind == TokenKind.Bool) {
+            primKind = PrimitiveType.Bool;
+        } else if (kind == TokenKind.Byte) {
+            primKind = PrimitiveType.Byte;
+        } else if (kind == TokenKind.Char) {
+            primKind = PrimitiveType.Char;
+        } else if (kind == TokenKind.Short) {
+            primKind = PrimitiveType.Short;
+        } else if (kind == TokenKind.Int) {
+            primKind = PrimitiveType.Int;
+        } else if (kind == TokenKind.Long) {
+            primKind = PrimitiveType.Long;
+        } else if (kind == TokenKind.Float) {
+            primKind = PrimitiveType.Float;
+        } else if (kind == TokenKind.Double) {
+            primKind = PrimitiveType.Double;
+        }
+
+        if (primKind == -1) {
+            return null;
+        }
+
+        this.advance();
+        TypeRef base = TypeRef.makePrimitive(primKind);
+
+        while (this.matchToken(TokenKind.LeftBracket)) {
+            this.expect(TokenKind.RightBracket);
+            base = TypeRef.makeArray(base);
+        }
+
+        return base;
+    }
+
+    public Array<TypeParam> parseTypeParams() {
+        this.expect(TokenKind.Lt);
+        Array<TypeParam> params = new Array<TypeParam>();
+
+        while (true) {
+            if (this.peekKind() == TokenKind.Gt) {
+                break;
+            }
+
+            Token nameTok = this.expect(TokenKind.Identifier);
+            String name = "";
+            if (nameTok != null) {
+                name = nameTok.strValue;
+            }
+
+            TypeRef bound = null;
+            if (this.matchToken(TokenKind.Extends)) {
+                bound = this.parseTypeRef();
+            }
+
+            params.push(new TypeParam(name, bound));
+
+            if (!this.matchToken(TokenKind.Comma)) {
+                break;
+            }
+        }
+
+        this.expect(TokenKind.Gt);
+        return params;
+    }
+
+    public Array<TypeRef> parseTypeArgs() {
+        this.expect(TokenKind.Lt);
+        Array<TypeRef> args = new Array<TypeRef>();
+
+        while (true) {
+            if (this.peekKind() == TokenKind.Gt) {
+                break;
+            }
+
+            args.push(this.parseTypeRef());
+
+            if (!this.matchToken(TokenKind.Comma)) {
+                break;
+            }
+        }
+
+        this.expect(TokenKind.Gt);
+        return args;
+    }
+
+    public Array<TypeRef> parseTypeList() {
+        if (this.peekKind() == TokenKind.RightParen) {
+            return new Array<TypeRef>();
+        }
+
+        Array<TypeRef> types = new Array<TypeRef>();
+        while (true) {
+            types.push(this.parseTypeRef());
+            if (!this.matchToken(TokenKind.Comma)) {
+                break;
+            }
+        }
+        return types;
+    }
+
+    public bool isTypeStart() {
+        if (this.isAtEnd()) {
+            return false;
+        }
+        int kind = this.peekKind();
+        return kind == TokenKind.Void
+            || kind == TokenKind.Bool
+            || kind == TokenKind.Byte
+            || kind == TokenKind.Char
+            || kind == TokenKind.Short
+            || kind == TokenKind.Int
+            || kind == TokenKind.Long
+            || kind == TokenKind.Float
+            || kind == TokenKind.Double
+            || kind == TokenKind.Identifier;
+    }
+
+    // ============================================================
+    // 注解
+    // ============================================================
+
+    public void parseAnnotation() {
+        this.expect(TokenKind.At);
+        if (this.peek() != null
+            && !this.checkKind(TokenKind.LeftBrace)
+            && !this.checkKind(TokenKind.RightBrace)
+            && !this.isAtEnd()) {
+            this.advance();
+        }
+    }
+
+    // ============================================================
+    // 语句
+    // ============================================================
+
+    public Block parseBlock() {
+        this.expect(TokenKind.LeftBrace);
+        Array<Stmt> statements = new Array<Stmt>();
+
+        while (!this.checkKind(TokenKind.RightBrace) && !this.isAtEnd()) {
+            Stmt stmt = this.parseStatement();
+            if (stmt != null) {
+                statements.push(stmt);
+            } else {
+                this.advance();
+            }
+        }
+
+        this.expect(TokenKind.RightBrace);
+        return new Block(statements);
+    }
+
+    public Stmt parseStatement() {
+        if (this.peek() == null) {
+            return null;
+        }
+
+        int kind = this.peekKind();
+
+        if (kind == TokenKind.LeftBrace) {
+            return Stmt.makeBlock(this.parseBlock().statements);
+        }
+
+        if (kind == TokenKind.If) {
+            return this.parseIfStmt();
+        }
+
+        if (kind == TokenKind.For) {
+            return this.parseForOrForEachStmt();
+        }
+
+        if (kind == TokenKind.While) {
+            return this.parseWhileStmt();
+        }
+
+        if (kind == TokenKind.Switch) {
+            return this.parseSwitchStmt();
+        }
+
+        if (kind == TokenKind.Return) {
+            this.advance();
+            Expr returnValue = null;
+            if (this.peekKind() != TokenKind.Semicolon) {
+                returnValue = this.parseExpression();
+            }
+            this.expect(TokenKind.Semicolon);
+            return Stmt.makeReturn(returnValue);
+        }
+
+        if (kind == TokenKind.Break) {
+            this.advance();
+            this.expect(TokenKind.Semicolon);
+            return Stmt.makeBreak();
+        }
+
+        if (kind == TokenKind.Continue) {
+            this.advance();
+            this.expect(TokenKind.Semicolon);
+            return Stmt.makeContinue();
+        }
+
+        if (kind == TokenKind.Try) {
+            return this.parseTryStmt();
+        }
+
+        if (kind == TokenKind.Throw) {
+            this.advance();
+            Expr expr = this.parseExpression();
+            this.expect(TokenKind.Semicolon);
+            return Stmt.makeExpr(Expr.makeThrow(expr));
+        }
+
+        // 修饰符开头的变量声明
+        if (kind == TokenKind.At || kind == TokenKind.Public || kind == TokenKind.Private
+            || kind == TokenKind.Static || kind == TokenKind.Final
+            || kind == TokenKind.Virtual || kind == TokenKind.Override
+            || kind == TokenKind.Abstract) {
+            return this.parseVarDeclStmt();
+        }
+
+        // 基本类型关键字开头的变量声明
+        if (kind == TokenKind.Void || kind == TokenKind.Int || kind == TokenKind.Long
+            || kind == TokenKind.Float || kind == TokenKind.Double
+            || kind == TokenKind.Bool || kind == TokenKind.Byte
+            || kind == TokenKind.Char || kind == TokenKind.Short) {
+            return this.parseVarDeclStmt();
+        }
+
+        // 标识符开头：需要区分变量声明和表达式语句
+        if (kind == TokenKind.Identifier) {
+            Token nextTok = null;
+            if (this.pos + 1 < this.tokens.size()) {
+                nextTok = this.tokens.get(this.pos + 1);
+            }
+            if (nextTok != null) {
+                int nextKind = nextTok.kind;
+                if (nextKind == TokenKind.LeftBracket
+                    || nextKind == TokenKind.Identifier
+                    || nextKind == TokenKind.Lt
+                    || nextKind == TokenKind.Star) {
+                    return this.parseVarDeclStmt();
+                }
+            }
+            return this.parseExprStmt();
+        }
+
+        return this.parseExprStmt();
+    }
+
+    public Stmt parseIfStmt() {
+        this.advance();
+        this.expect(TokenKind.LeftParen);
+        Expr condition = this.parseExpression();
+        this.expect(TokenKind.RightParen);
+
+        Stmt thenBranch = this.parseStatement();
+        if (thenBranch == null) {
+            thenBranch = Stmt.makeExpr(Expr.makeVariable(""));
+        }
+
+        Stmt elseBranch = null;
+        if (this.matchToken(TokenKind.Else)) {
+            elseBranch = this.parseStatement();
+            if (elseBranch == null) {
+                elseBranch = Stmt.makeExpr(Expr.makeVariable(""));
+            }
+        }
+
+        return Stmt.makeIf(condition, thenBranch, elseBranch);
+    }
+
+    public Stmt parseWhileStmt() {
+        this.advance();
+        this.expect(TokenKind.LeftParen);
+        Expr condition = this.parseExpression();
+        this.expect(TokenKind.RightParen);
+        Stmt body = this.parseStatement();
+        if (body == null) {
+            body = Stmt.makeExpr(Expr.makeVariable(""));
+        }
+        return Stmt.makeWhile(condition, body);
+    }
+
+    public Stmt parseForOrForEachStmt() {
+        this.advance();
+        this.expect(TokenKind.LeftParen);
+
+        bool isForEach = this.isForeachPattern();
+        if (isForEach) {
+            return this.parseForEachStmt();
+        } else {
+            return this.parseForStmtBody();
+        }
+    }
+
+    public bool isForeachPattern() {
+        int scanPos = this.pos;
+
+        if (scanPos >= this.tokens.size()) {
+            return false;
+        }
+
+        if (this.isTypeTokenAt(scanPos)) {
+            scanPos = scanPos + 1;
+            if (scanPos < this.tokens.size()) {
+                Token spTok = this.tokens.get(scanPos);
+                if (spTok.kind == TokenKind.Lt) {
+                    while (scanPos < this.tokens.size()) {
+                        Token kTok = this.tokens.get(scanPos);
+                        int k = kTok.kind;
+                        if (k == TokenKind.Gt || k == TokenKind.Shr) {
+                            scanPos = scanPos + 1;
+                            break;
+                        }
+                        scanPos = scanPos + 1;
+                    }
+                }
+            }
+            if (scanPos < this.tokens.size()) {
+                Token idTok = this.tokens.get(scanPos);
+                if (idTok.kind == TokenKind.Identifier) {
+                    scanPos = scanPos + 1;
+                    if (scanPos < this.tokens.size()) {
+                        Token inTok = this.tokens.get(scanPos);
+                        if (inTok.kind == TokenKind.In) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (scanPos < this.tokens.size()) {
+            Token idTok2 = this.tokens.get(scanPos);
+            if (idTok2.kind == TokenKind.Identifier) {
+                scanPos = scanPos + 1;
+                if (scanPos < this.tokens.size()) {
+                    Token inTok2 = this.tokens.get(scanPos);
+                    if (inTok2.kind == TokenKind.In) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public Stmt parseForEachStmt() {
+        TypeRef elemType = this.parseTypeRef();
+        Token nameTok = this.expect(TokenKind.Identifier);
+        String name = "";
+        if (nameTok != null) {
+            name = nameTok.strValue;
+        }
+
+        this.expect(TokenKind.In);
+        Expr iterable = this.parseExpression();
+        this.expect(TokenKind.RightParen);
+        Stmt body = this.parseStatement();
+        if (body == null) {
+            body = Stmt.makeExpr(Expr.makeVariable(""));
+        }
+
+        return Stmt.makeForEach(elemType, name, iterable, body);
+    }
+
+    public Stmt parseForStmtBody() {
+        Stmt init = null;
+        if (this.peekKind() != TokenKind.Semicolon) {
+            bool isDecl = this.isPrimitiveTypeKind(this.peekKind());
+            if (isDecl) {
+                init = this.parseVarDeclForInit();
+            } else {
+                init = Stmt.makeExpr(this.parseExpression());
+            }
+        }
+        this.expect(TokenKind.Semicolon);
+
+        Expr forCond = null;
+        if (this.peekKind() != TokenKind.Semicolon) {
+            forCond = this.parseExpression();
+        }
+        this.expect(TokenKind.Semicolon);
+
+        Expr update = null;
+        if (this.peekKind() != TokenKind.RightParen) {
+            update = this.parseExpression();
+        }
+        this.expect(TokenKind.RightParen);
+
+        Stmt body = this.parseStatement();
+        if (body == null) {
+            body = Stmt.makeExpr(Expr.makeVariable(""));
+        }
+
+        return Stmt.makeFor(init, forCond, update, body);
+    }
+
+    public Stmt parseTryStmt() {
+        this.advance();
+        Block tryBlock = this.parseBlock();
+
+        Array<CatchClause> catchClauses = new Array<CatchClause>();
+        while (this.matchToken(TokenKind.Catch)) {
+            this.expect(TokenKind.LeftParen);
+            TypeRef varType = this.parseTypeRef();
+            Token nameTok = this.expect(TokenKind.Identifier);
+            if (nameTok == null) {
+                break;
+            }
+            String name = nameTok.strValue;
+            this.expect(TokenKind.RightParen);
+            Block body = this.parseBlock();
+            catchClauses.push(new CatchClause(varType, name, body));
+        }
+
+        Block finallyBlock = null;
+        if (this.matchToken(TokenKind.Finally)) {
+            finallyBlock = this.parseBlock();
+        }
+
+        return Stmt.makeTry(tryBlock, catchClauses, finallyBlock);
+    }
+
+    public Stmt parseVarDeclStmt() {
+        Array<int> modifiers = new Array<int>();
+
+        while (true) {
+            int kind = this.peekKind();
+            if (kind == TokenKind.Public) {
+                modifiers.push(VarModifier.Public);
+                this.advance();
+            } else if (kind == TokenKind.Private) {
+                modifiers.push(VarModifier.Private);
+                this.advance();
+            } else if (kind == TokenKind.Static) {
+                modifiers.push(VarModifier.Static);
+                this.advance();
+            } else if (kind == TokenKind.Final) {
+                modifiers.push(VarModifier.Final);
+                this.advance();
+            } else if (kind == TokenKind.Virtual) {
+                modifiers.push(VarModifier.Virtual);
+                this.advance();
+            } else if (kind == TokenKind.Override) {
+                modifiers.push(VarModifier.Override);
+                this.advance();
+            } else if (kind == TokenKind.Abstract) {
+                modifiers.push(VarModifier.Abstract);
+                this.advance();
+            } else if (kind == TokenKind.At) {
+                this.parseAnnotation();
+            } else {
+                break;
+            }
+        }
+
+        TypeRef varType = this.parseTypeRef();
+        Token nameTok = this.expect(TokenKind.Identifier);
+        if (nameTok == null) {
+            return Stmt.makeExpr(Expr.makeVariable(""));
+        }
+        String name = nameTok.strValue;
+
+        Expr initializer = null;
+        if (this.matchToken(TokenKind.Assign)) {
+            initializer = this.parseExpression();
+        }
+
+        this.expect(TokenKind.Semicolon);
+
+        return Stmt.makeVarDecl(new VarDecl(varType, name, initializer, modifiers));
+    }
+
+    public Stmt parseVarDeclForInit() {
+        TypeRef varType = this.parseTypeRef();
+        Token nameTok = this.expect(TokenKind.Identifier);
+        if (nameTok == null) {
+            return Stmt.makeExpr(Expr.makeVariable(""));
+        }
+        String name = nameTok.strValue;
+
+        Expr initializer = null;
+        if (this.matchToken(TokenKind.Assign)) {
+            initializer = this.parseExpression();
+        }
+
+        return Stmt.makeVarDecl(new VarDecl(varType, name, initializer, new Array<int>()));
+    }
+
+    public Stmt parseExprStmt() {
+        Expr expr = this.parseExpression();
+        this.expect(TokenKind.Semicolon);
+        return Stmt.makeExpr(expr);
+    }
+
+    public Stmt parseSwitchStmt() {
+        this.advance();
+        this.expect(TokenKind.LeftParen);
+        Expr subject = this.parseExpression();
+        this.expect(TokenKind.RightParen);
+
+        this.expect(TokenKind.LeftBrace);
+        Array<SwitchCase> cases = new Array<SwitchCase>();
+        Block defaultBlock = null;
+
+        while (!this.checkKind(TokenKind.RightBrace) && !this.isAtEnd()) {
+            if (this.checkKind(TokenKind.Case)) {
+                this.advance();
+                Array<Expr> patterns = new Array<Expr>();
+                patterns.push(this.parseExpression());
+                while (this.matchToken(TokenKind.Comma)) {
+                    patterns.push(this.parseExpression());
+                }
+                this.expect(TokenKind.Colon);
+                Block body = this.parseSwitchCaseBody();
+                cases.push(new SwitchCase(patterns, body));
+            } else if (this.checkKind(TokenKind.Default)) {
+                this.advance();
+                this.expect(TokenKind.Colon);
+                defaultBlock = this.parseSwitchCaseBody();
+            } else {
+                this.advance();
+            }
+        }
+        this.expect(TokenKind.RightBrace);
+
+        return Stmt.makeSwitch(subject, cases, defaultBlock);
+    }
+
+    public Block parseSwitchCaseBody() {
+        Array<Stmt> statements = new Array<Stmt>();
+        while (!this.checkKind(TokenKind.RightBrace)
+            && !this.checkKind(TokenKind.Case)
+            && !this.checkKind(TokenKind.Default)
+            && !this.isAtEnd()) {
+            Stmt stmt = this.parseStatement();
+            if (stmt != null) {
+                statements.push(stmt);
+            } else {
+                break;
+            }
+        }
+        return new Block(statements);
+    }
+
+    // ============================================================
+    // 表达式（Pratt 解析器）
+    // ============================================================
+
+    public Expr parseExpression() {
+        return this.parseExpressionWithMinPrecedence(0);
+    }
+
+    public static int getPrecedence(int kind) {
+        if (kind == TokenKind.Question) return 1;
+        if (kind == TokenKind.Or) return 2;
+        if (kind == TokenKind.And) return 3;
+        if (kind == TokenKind.Pipe) return 4;
+        if (kind == TokenKind.Caret) return 5;
+        if (kind == TokenKind.Amp) return 6;
+        if (kind == TokenKind.Eq || kind == TokenKind.Ne) return 7;
+        if (kind == TokenKind.Lt || kind == TokenKind.Gt
+            || kind == TokenKind.Le || kind == TokenKind.Ge) return 8;
+        if (kind == TokenKind.Shl || kind == TokenKind.Shr) return 9;
+        if (kind == TokenKind.Plus || kind == TokenKind.Minus) return 10;
+        if (kind == TokenKind.Star || kind == TokenKind.Slash
+            || kind == TokenKind.Percent) return 11;
+        return 0;
+    }
+
+    public Expr parseExpressionWithMinPrecedence(int minPrec) {
+        Expr expr = this.parseUnaryExpression();
+
+        while (true) {
+            if (this.isAtEnd()) {
+                break;
+            }
+
+            int opKind = this.peekKind();
+
+            // 赋值运算符 (right-to-left, lowest precedence, checked before precedence break)
+            if (opKind == TokenKind.Assign || opKind == TokenKind.PlusAssign
+                || opKind == TokenKind.MinusAssign || opKind == TokenKind.StarAssign
+                || opKind == TokenKind.SlashAssign || opKind == TokenKind.PercentAssign
+                || opKind == TokenKind.AndAssign || opKind == TokenKind.OrAssign
+                || opKind == TokenKind.XorAssign || opKind == TokenKind.ShlAssign
+                || opKind == TokenKind.ShrAssign) {
+                this.advance();
+                Expr right = this.parseExpression();
+                expr = Expr.makeAssignment(expr, right);
+                continue;
+            }
+
+            int precedence = Parser.getPrecedence(this.peekKind());
+            if (precedence == 0 || precedence < minPrec) {
+                break;
+            }
+
+            // 三元表达式
+            if (opKind == TokenKind.Question) {
+                this.advance();
+                Expr thenExpr = this.parseExpression();
+                this.expect(TokenKind.Colon);
+                Expr elseExpr = this.parseExpression();
+                expr = Expr.makeTernary(expr, thenExpr, elseExpr);
+                continue;
+            }
+
+            // 二元运算符
+            if (Parser.getPrecedence(opKind) > 0) {
+                this.advance();
+                Expr right = this.parseExpressionWithMinPrecedence(precedence + 1);
+                int binaryOp = this.tokenKindToBinaryOp(opKind);
+                if (binaryOp >= 0) {
+                    expr = Expr.makeBinaryOp(binaryOp, expr, right);
+                }
+            } else {
+                break;
+            }
+        }
+
+        return expr;
+    }
+
+    public Expr parseUnaryExpression() {
+        int kind = this.peekKind();
+        int unaryOp = -1;
+
+        if (kind == TokenKind.Plus) {
+            unaryOp = UnaryOp.Plus;
+        } else if (kind == TokenKind.Minus) {
+            unaryOp = UnaryOp.Minus;
+        } else if (kind == TokenKind.Not) {
+            unaryOp = UnaryOp.Not;
+        } else if (kind == TokenKind.Tilde) {
+            unaryOp = UnaryOp.BitNot;
+        } else if (kind == TokenKind.Star) {
+            unaryOp = UnaryOp.Deref;
+        } else if (kind == TokenKind.Amp) {
+            unaryOp = UnaryOp.AddressOf;
+        } else if (kind == TokenKind.Inc) {
+            unaryOp = UnaryOp.PreInc;
+        } else if (kind == TokenKind.Dec) {
+            unaryOp = UnaryOp.PreDec;
+        }
+
+        if (unaryOp >= 0) {
+            this.advance();
+            Expr operand = this.parseUnaryExpression();
+            return Expr.makeUnaryOp(unaryOp, operand);
+        }
+
+        return this.parsePostfixExpression();
+    }
+
+    public Expr parsePostfixExpression() {
+        Expr expr = this.parsePrimaryExpression();
+
+        while (true) {
+            if (this.isAtEnd()) {
+                break;
+            }
+
+            int kind = this.peekKind();
+
+            if (kind == TokenKind.Inc) {
+                this.advance();
+                expr = Expr.makeUnaryOp(UnaryOp.PostInc, expr);
+            } else if (kind == TokenKind.Dec) {
+                this.advance();
+                expr = Expr.makeUnaryOp(UnaryOp.PostDec, expr);
+            } else if (kind == TokenKind.LeftParen) {
+                this.advance();
+                Array<Expr> args = this.parseArguments();
+                this.expect(TokenKind.RightParen);
+                expr = Expr.makeCall(expr, args);
+            } else if (kind == TokenKind.Dot) {
+                this.advance();
+                Token nameTok = this.advance();
+                if (nameTok == null) {
+                    break;
+                }
+                String name = nameTok.strValue;
+                expr = Expr.makeFieldAccess(expr, name);
+            } else if (kind == TokenKind.Arrow) {
+                this.advance();
+                Token nameTok = this.advance();
+                if (nameTok == null) {
+                    break;
+                }
+                String name = nameTok.strValue;
+                if (this.peekKind() == TokenKind.LeftParen) {
+                    this.advance();
+                    Array<Expr> args = this.parseArguments();
+                    this.expect(TokenKind.RightParen);
+                    expr = Expr.makeMethodCall(expr, name, args);
+                } else {
+                    expr = Expr.makeFieldAccess(expr, name);
+                }
+            } else if (kind == TokenKind.LeftBracket) {
+                this.advance();
+                Expr index = this.parseExpression();
+                this.expect(TokenKind.RightBracket);
+                expr = Expr.makeArrayAccess(expr, index);
+            } else if (kind == TokenKind.InstanceOf) {
+                this.advance();
+                TypeRef typeRef = this.parseTypeRef();
+                expr = Expr.makeInstanceOf(expr, typeRef);
+            } else {
+                break;
+            }
+        }
+
+        return expr;
+    }
+
+    public Expr parsePrimaryExpression() {
+        if (this.isAtEnd()) {
+            return Expr.makeVariable("");
+        }
+
+        int kind = this.peekKind();
+
+        if (kind == TokenKind.IntegerLiteral) {
+            Token tok = this.advance();
+            return Expr.makeIntegerLiteral(tok.intValue);
+        }
+
+        if (kind == TokenKind.FloatLiteral) {
+            Token tok = this.advance();
+            return Expr.makeFloatLiteral(tok.floatValue);
+        }
+
+        if (kind == TokenKind.StringLiteral) {
+            Token tok = this.advance();
+            return Expr.makeStringLiteral(tok.strValue);
+        }
+
+        if (kind == TokenKind.CharLiteral) {
+            Token tok = this.advance();
+            return Expr.makeCharLiteral(tok.charValue);
+        }
+
+        if (kind == TokenKind.True) {
+            this.advance();
+            return Expr.makeBoolLiteral(true);
+        }
+
+        if (kind == TokenKind.False) {
+            this.advance();
+            return Expr.makeBoolLiteral(false);
+        }
+
+        if (kind == TokenKind.Null) {
+            this.advance();
+            return Expr.makeNull();
+        }
+
+        if (kind == TokenKind.This) {
+            this.advance();
+            return Expr.makeThis();
+        }
+
+        if (kind == TokenKind.Super) {
+            this.advance();
+            return Expr.makeSuper();
+        }
+
+        if (kind == TokenKind.Identifier) {
+            Token tok = this.advance();
+            return Expr.makeVariable(tok.strValue);
+        }
+
+        if (kind == TokenKind.New) {
+            return this.parseNewExpression();
+        }
+
+        if (kind == TokenKind.Delete) {
+            return this.parseDeleteExpression();
+        }
+
+        if (kind == TokenKind.Sizeof) {
+            return this.parseSizeofExpression();
+        }
+
+        if (kind == TokenKind.TypeId) {
+            return this.parseTypeIdExpression();
+        }
+
+        if (kind == TokenKind.Match) {
+            return this.parseMatchExpression();
+        }
+
+        if (kind == TokenKind.LeftParen) {
+            this.advance();
+            if (this.isTypeStart()) {
+                TypeRef typeRef = this.parseTypeRef();
+                this.expect(TokenKind.RightParen);
+                Expr operand = this.parseUnaryExpression();
+                return Expr.makeCast(typeRef, operand);
+            } else {
+                Expr expr = this.parseExpression();
+                this.expect(TokenKind.RightParen);
+                return expr;
+            }
+        }
+
+        // 无法识别的 token
+        Token tok = this.advance();
+        if (tok != null) {
+            String msg = "Unexpected token: " + TokenKind.toString(tok.kind)
+                + " at line " + String.intToString(tok.span.line)
+                + " col " + String.intToString(tok.span.column);
+            this.errors.push(msg);
+        }
+        return Expr.makeVariable("");
+    }
+
+    // ============================================================
+    // 特殊表达式
+    // ============================================================
+
+    public Expr parseNewExpression() {
+        this.advance();
+        Token nameTok = this.expect(TokenKind.Identifier);
+        String name = "";
+        if (nameTok != null) {
+            name = nameTok.strValue;
+        }
+
+        Array<TypeRef> typeArgs = new Array<TypeRef>();
+        if (this.peekKind() == TokenKind.Lt) {
+            typeArgs = this.parseTypeArgs();
+        }
+
+        Array<Expr> args = new Array<Expr>();
+        if (this.peekKind() == TokenKind.LeftParen) {
+            this.advance();
+            args = this.parseArguments();
+        }
+
+        if (this.peekKind() == TokenKind.RightParen) {
+            this.expect(TokenKind.RightParen);
+        }
+
+        return Expr.makeNew(name, typeArgs, args);
+    }
+
+    public Expr parseDeleteExpression() {
+        this.advance();
+        Expr operand = this.parseUnaryExpression();
+        return Expr.makeDelete(operand);
+    }
+
+    public Expr parseSizeofExpression() {
+        this.advance();
+        this.expect(TokenKind.LeftParen);
+        TypeRef typeRef = this.parseTypeRef();
+        this.expect(TokenKind.RightParen);
+        return Expr.makeSizeof(typeRef);
+    }
+
+    public Expr parseTypeIdExpression() {
+        this.advance();
+        this.expect(TokenKind.LeftParen);
+        Expr expr = this.parseExpression();
+        this.expect(TokenKind.RightParen);
+        return Expr.makeTypeId(expr);
+    }
+
+    public Array<Expr> parseArguments() {
+        if (this.peekKind() == TokenKind.RightParen) {
+            return new Array<Expr>();
+        }
+
+        Array<Expr> args = new Array<Expr>();
+        while (true) {
+            args.push(this.parseExpression());
+            if (!this.matchToken(TokenKind.Comma)) {
+                break;
+            }
+        }
+        return args;
+    }
+
+    // ============================================================
+    // Match 表达式
+    // ============================================================
+
+    public Expr parseMatchExpression() {
+        this.advance();
+        this.expect(TokenKind.LeftParen);
+        Expr subject = this.parseExpression();
+        this.expect(TokenKind.RightParen);
+
+        this.expect(TokenKind.LeftBrace);
+        Array<MatchArm> arms = new Array<MatchArm>();
+        while (!this.checkKind(TokenKind.RightBrace) && !this.isAtEnd()) {
+            MatchArm arm = this.parseMatchArm();
+            if (arm != null) {
+                arms.push(arm);
+                if (!this.matchToken(TokenKind.Comma)) {
+                    if (this.checkKind(TokenKind.RightBrace)) {
+                        break;
+                    }
+                }
+            } else {
+                this.advance();
+            }
+        }
+        this.expect(TokenKind.RightBrace);
+
+        return Expr.makeMatch(subject, arms);
+    }
+
+    public MatchArm parseMatchArm() {
+        MatchPattern pattern = this.parseMatchPattern();
+        if (pattern == null) {
+            return null;
+        }
+        this.expect(TokenKind.FatArrow);
+
+        MatchBody body = null;
+        if (this.peekKind() == TokenKind.LeftBrace) {
+            body = MatchBody.makeBlock(this.parseBlock());
+        } else {
+            body = MatchBody.makeExpr(this.parseExpression());
+        }
+
+        return new MatchArm(pattern, body);
+    }
+
+    public MatchPattern parseMatchPattern() {
+        Token tok = this.peek();
+        if (tok != null && tok.kind == TokenKind.Identifier) {
+            String name = tok.strValue;
+
+            if (name == "_") {
+                this.advance();
+                return MatchPattern.makeWildcard();
+            }
+
+            this.advance();
+
+            Array<MatchBinding> bindings = new Array<MatchBinding>();
+            if (this.peekKind() == TokenKind.LeftParen) {
+                this.advance();
+                bindings = this.parseMatchBindings();
+            }
+
+            if (this.peekKind() == TokenKind.Pipe) {
+                Array<MatchPattern> patterns = new Array<MatchPattern>();
+                patterns.push(MatchPattern.makeVariant(name, bindings));
+                while (this.matchToken(TokenKind.Pipe)) {
+                    MatchPattern p = this.parseMatchPattern();
+                    if (p != null) {
+                        patterns.push(p);
+                    }
+                }
+                return MatchPattern.makeOr(patterns);
+            } else {
+                return MatchPattern.makeVariant(name, bindings);
+            }
+        } else {
+            Expr expr = this.parseExpression();
+            return MatchPattern.makeLiteral(expr);
+        }
+    }
+
+    public Array<MatchBinding> parseMatchBindings() {
+        Array<MatchBinding> bindings = new Array<MatchBinding>();
+        while (!this.checkKind(TokenKind.RightParen) && !this.isAtEnd()) {
+            TypeRef fieldType = this.parseTypeRef();
+            Token nameTok = this.expect(TokenKind.Identifier);
+            if (nameTok == null) {
+                break;
+            }
+            String name = nameTok.strValue;
+            bindings.push(new MatchBinding(fieldType, name));
+            if (!this.matchToken(TokenKind.Comma)) {
+                break;
+            }
+        }
+        this.expect(TokenKind.RightParen);
+        return bindings;
+    }
+
+    // ============================================================
+    // 辅助方法
+    // ============================================================
+
+    public int tokenKindToBinaryOp(int kind) {
+        if (kind == TokenKind.Plus) return BinaryOp.Add;
+        if (kind == TokenKind.Minus) return BinaryOp.Sub;
+        if (kind == TokenKind.Star) return BinaryOp.Mul;
+        if (kind == TokenKind.Slash) return BinaryOp.Div;
+        if (kind == TokenKind.Percent) return BinaryOp.Mod;
+        if (kind == TokenKind.And) return BinaryOp.And;
+        if (kind == TokenKind.Or) return BinaryOp.Or;
+        if (kind == TokenKind.Amp) return BinaryOp.BitAnd;
+        if (kind == TokenKind.Pipe) return BinaryOp.BitOr;
+        if (kind == TokenKind.Caret) return BinaryOp.BitXor;
+        if (kind == TokenKind.Shl) return BinaryOp.Shl;
+        if (kind == TokenKind.Shr) return BinaryOp.Shr;
+        if (kind == TokenKind.Eq) return BinaryOp.Eq;
+        if (kind == TokenKind.Ne) return BinaryOp.Ne;
+        if (kind == TokenKind.Lt) return BinaryOp.Lt;
+        if (kind == TokenKind.Gt) return BinaryOp.Gt;
+        if (kind == TokenKind.Le) return BinaryOp.Le;
+        if (kind == TokenKind.Ge) return BinaryOp.Ge;
+        return -1;
+    }
+
+    public String typeRefToName(TypeRef typeRef) {
+        if (typeRef.kind == TypeRefKind.Named) {
+            return typeRef.name;
+        }
+        if (typeRef.kind == TypeRefKind.Primitive) {
+            return PrimitiveType.toString(typeRef.primitiveKind);
+        }
+        return "";
+    }
+
+    public Array<int> methodModsToVarMods(Array<int> modifiers) {
+        Array<int> result = new Array<int>();
+        int i = 0;
+        while (i < modifiers.size()) {
+            int m = modifiers.get(i);
+            if (m == MethodModifier.Public) {
+                result.push(VarModifier.Public);
+            } else if (m == MethodModifier.Private) {
+                result.push(VarModifier.Private);
+            } else if (m == MethodModifier.Static) {
+                result.push(VarModifier.Static);
+            } else if (m == MethodModifier.Final) {
+                result.push(VarModifier.Final);
+            } else if (m == MethodModifier.Virtual) {
+                result.push(VarModifier.Virtual);
+            } else if (m == MethodModifier.Override) {
+                result.push(VarModifier.Override);
+            } else if (m == MethodModifier.Abstract) {
+                result.push(VarModifier.Abstract);
+            }
+            i = i + 1;
+        }
+        return result;
+    }
+
+    public bool isPrimitiveTypeKind(int kind) {
+        return kind == TokenKind.Void || kind == TokenKind.Int
+            || kind == TokenKind.Long || kind == TokenKind.Float
+            || kind == TokenKind.Double || kind == TokenKind.Bool
+            || kind == TokenKind.Byte || kind == TokenKind.Char
+            || kind == TokenKind.Short;
+    }
+
+    public bool isTypeTokenAt(int scanPos) {
+        if (scanPos >= this.tokens.size()) {
+            return false;
+        }
+        Token spTok = this.tokens.get(scanPos);
+        int kind = spTok.kind;
+        return kind == TokenKind.Identifier
+            || kind == TokenKind.Void
+            || kind == TokenKind.Bool
+            || kind == TokenKind.Byte
+            || kind == TokenKind.Char
+            || kind == TokenKind.Short
+            || kind == TokenKind.Int
+            || kind == TokenKind.Long
+            || kind == TokenKind.Float
+            || kind == TokenKind.Double;
+    }
+}

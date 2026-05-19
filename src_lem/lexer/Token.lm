@@ -47,7 +47,7 @@ class Token {
             return "Identifier(" + this.strValue + ")";
         }
         if (this.kind == TokenKind.IntegerLiteral) {
-            return "Int(" + String.intToString((int)this.intValue) + ")";
+            return "Int(" + String.longToString(this.intValue) + ")";
         }
         if (this.kind == TokenKind.FloatLiteral) {
             return "Float(" + String.doubleToString(this.floatValue) + ")";

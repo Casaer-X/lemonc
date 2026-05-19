@@ -563,7 +563,15 @@ impl Parser {
                 var_type: return_type,
                 name,
                 initializer,
-                modifiers: Vec::new(),
+                modifiers: modifiers.into_iter().map(|m| match m {
+                    MethodModifier::Public => VarModifier::Public,
+                    MethodModifier::Private => VarModifier::Private,
+                    MethodModifier::Static => VarModifier::Static,
+                    MethodModifier::Final => VarModifier::Final,
+                    MethodModifier::Virtual => VarModifier::Virtual,
+                    MethodModifier::Override => VarModifier::Override,
+                    MethodModifier::Abstract => VarModifier::Abstract,
+                }).collect(),
             }))
         }
     }
