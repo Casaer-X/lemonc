@@ -215,11 +215,22 @@ impl AstOptimizer {
                 }
             }
             Expr::UnaryOp(op, operand) => {
-                self.optimize_expr(operand);
-                let folded = self.try_fold_unary(*op, operand);
-                if let Some(result) = folded {
-                    self.stats.constants_folded += 1;
-                    *expr = result;
+                // Don't propagate constants into increment/decrement operands
+                // because they have side effects (i++ should not become 1++)
+                match op {
+                    UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec => {
+                        // Don't optimize the operand - it's being modified
+                        // But we should NOT fold the entire expression either
+                        return;
+                    }
+                    _ => {
+                        self.optimize_expr(operand);
+                        let folded = self.try_fold_unary(*op, operand);
+                        if let Some(result) = folded {
+                            self.stats.constants_folded += 1;
+                            *expr = result;
+                        }
+                    }
                 }
             }
             Expr::Ternary(cond, then, else_) => {
@@ -413,7 +424,16 @@ impl AstOptimizer {
                 Self::collect_assigned_vars_expr_impl(left, vars);
                 Self::collect_assigned_vars_expr_impl(right, vars);
             }
-            Expr::UnaryOp(_, e) => {
+            Expr::UnaryOp(op, e) => {
+                // Increment/decrement operators modify the variable
+                match op {
+                    UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec => {
+                        if let Expr::Variable(name) = e.as_ref() {
+                            vars.push(name.clone());
+                        }
+                    }
+                    _ => {}
+                }
                 Self::collect_assigned_vars_expr_impl(e, vars);
             }
             Expr::Call(callee, args) => {

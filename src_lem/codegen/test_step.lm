@@ -1,0 +1,113 @@
+class TestStep {
+    public static void main(String[] args) {
+        // Step 1: Simple objects
+        System.printf("Step 1: Creating objects...\n");
+        Dog d = new Dog("Buddy", 3);
+        Cat c = new Cat("Whiskers", 5);
+        System.printf("Step 1: OK\n");
+
+        // Step 2: Method calls
+        System.printf("Step 2: Method calls...\n");
+        d.speak();
+        c.speak();
+        System.printf("Step 2: OK\n");
+
+        // Step 3: Interface calls
+        System.printf("Step 3: Interface calls...\n");
+        d.print();
+        c.print();
+        System.printf("Step 3: OK\n");
+
+        // Step 4: Array
+        System.printf("Step 4: Array...\n");
+        Array<String> names = new Array<String>();
+        names.add("Alice");
+        names.add("Bob");
+        System.printf("Array size: %d\n", names.size());
+        System.printf("Step 4: OK\n");
+
+        // Step 5: Map<String, int>
+        System.printf("Step 5: Map<String, int>...\n");
+        Map<String, int> scores = new Map<String, int>();
+        scores.put("Alice", 100);
+        scores.put("Bob", 85);
+        System.printf("Alice score: %d\n", scores.get("Alice"));
+        System.printf("Step 5: OK\n");
+
+        // Step 6: StringBuilder
+        System.printf("Step 6: StringBuilder...\n");
+        StringBuilder sb = new StringBuilder();
+        sb.append("Hello");
+        sb.append(" ");
+        sb.append("World");
+        System.printf("StringBuilder: %s\n", sb.toString());
+        System.printf("Step 6: OK\n");
+
+        // Step 7: For loop
+        System.printf("Step 7: For loop...\n");
+        int sum = 0;
+        for (int i = 1; i <= 10; i++) {
+            sum = sum + i;
+        }
+        System.printf("Sum 1-10: %d\n", sum);
+        System.printf("Step 7: OK\n");
+
+        // Step 8: String concat
+        System.printf("Step 8: String concat...\n");
+        String greeting = "Hello, " + "Lemon!";
+        System.printf("Greeting: %s\n", greeting);
+        System.printf("Length: %d\n", greeting.length());
+        System.printf("Step 8: OK\n");
+
+        System.printf("All tests passed!\n");
+    }
+}
+
+interface Printable {
+    void print();
+}
+
+class Animal {
+    public String name;
+    public int age;
+
+    public Animal(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    @virtual
+    public void speak() {
+        System.printf("%s says: ...\n", this.name);
+    }
+}
+
+class Dog extends Animal implements Printable {
+    public Dog(String name, int age) {
+        super(name, age);
+    }
+
+    @override
+    public void speak() {
+        System.printf("%s says: Woof!\n", this.name);
+    }
+
+    public void print() {
+        System.printf("Dog(%s, %d)\n", this.name, this.age);
+    }
+}
+
+class Cat extends Animal implements Printable {
+    public Cat(String name, int age) {
+        super(name, age);
+    }
+
+    @override
+    public void speak() {
+        System.printf("%s says: Meow!\n", this.name);
+    }
+
+    public void print() {
+        System.printf("Cat(%s, %d)\n", this.name, this.age);
+    }
+}

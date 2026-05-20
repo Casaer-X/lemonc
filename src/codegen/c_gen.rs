@@ -536,6 +536,7 @@ impl CCodeGen {
         self.emit_line("} LemonArray;");
         self.emit_line("");
         self.emit_line("LemonArray* LemonArray_new(int32_t elem_size) {");
+        self.emit_line("    if (elem_size <= 0) elem_size = (int32_t)sizeof(void*);");
         self.emit_line("    LemonArray* arr = (LemonArray*)malloc(sizeof(LemonArray));");
         self.emit_line("    arr->length = 0;");
         self.emit_line("    arr->capacity = 8;");
@@ -691,6 +692,28 @@ impl CCodeGen {
         self.emit_line("        }");
         self.emit_line("        idx = (idx + 1) % map->capacity;");
         self.emit_line("    }");
+        self.emit_line("}");
+        self.emit_line("");
+        self.emit_line("LemonArray* LemonMap_keys(LemonMap* map) {");
+        self.emit_line("    if (!map) return LemonArray_new(sizeof(void*));");
+        self.emit_line("    LemonArray* arr = LemonArray_new(sizeof(void*));");
+        self.emit_line("    for (int32_t i = 0; i < map->capacity; i++) {");
+        self.emit_line("        if (map->entries[i].occupied && map->entries[i].key) {");
+        self.emit_line("            LemonArray_add(arr, (void*)map->entries[i].key);");
+        self.emit_line("        }");
+        self.emit_line("    }");
+        self.emit_line("    return arr;");
+        self.emit_line("}");
+        self.emit_line("");
+        self.emit_line("LemonArray* LemonMap_values(LemonMap* map) {");
+        self.emit_line("    if (!map) return LemonArray_new(sizeof(void*));");
+        self.emit_line("    LemonArray* arr = LemonArray_new(sizeof(void*));");
+        self.emit_line("    for (int32_t i = 0; i < map->capacity; i++) {");
+        self.emit_line("        if (map->entries[i].occupied && map->entries[i].value) {");
+        self.emit_line("            LemonArray_add(arr, map->entries[i].value);");
+        self.emit_line("        }");
+        self.emit_line("    }");
+        self.emit_line("    return arr;");
         self.emit_line("}");
         self.emit_line("");
 
@@ -1100,13 +1123,8 @@ impl CCodeGen {
             self.emit_line("void** vtable;");
         }
 
-        let iface_names: Vec<String> = self.class_implements.get(&class.name)
-            .cloned()
-            .unwrap_or_default();
-        for iface_name in &iface_names {
-            self.emit_line(&format!("{}_itable* itable_{};", iface_name, iface_name));
-        }
-
+        // Parent fields MUST come before itable pointers to maintain
+        // layout compatibility when casting Dog* to Animal*
         if let Some(parent_name) = class.extends.as_ref().and_then(|t| {
             if let TypeRef::Named(name, _) = t { Some(name.clone()) } else { None }
         }) {
@@ -1117,6 +1135,13 @@ impl CCodeGen {
             for (field_type, field_name) in &parent_fields {
                 self.emit_line(&format!("{} {};", field_type, field_name));
             }
+        }
+
+        let iface_names: Vec<String> = self.class_implements.get(&class.name)
+            .cloned()
+            .unwrap_or_default();
+        for iface_name in &iface_names {
+            self.emit_line(&format!("{}_itable* itable_{};", iface_name, iface_name));
         }
 
         for member in &class.members {
@@ -1695,36 +1720,75 @@ impl CCodeGen {
                                 return format!("{}({})", method, arg_strs.join(", "));
                             }
                             if Self::is_simple_builtin_type(var_name) {
-                                return Self::gen_builtin_type_method_call(var_name, method, &arg_strs);
+                                // Wrap int args for Map/Array void* params
+                                let wrapped_arg_strs: Vec<String> = if var_name == "Map" || var_name == "Array" {
+                                    arg_strs.iter().enumerate().map(|(i, a)| {
+                                        if (var_name == "Map" && method == "put" && i == 1) ||
+                                           (var_name == "Array" && (method == "add" || method == "push")) ||
+                                           (var_name == "Array" && method == "set" && i == 1) {
+                                            self.wrap_int_arg_for_void_ptr(a)
+                                        } else {
+                                            a.clone()
+                                        }
+                                    }).collect()
+                                } else {
+                                    arg_strs.clone()
+                                };
+                                return Self::gen_builtin_type_method_call(var_name, method, &wrapped_arg_strs);
                             }
                         }
 
                         let obj_str = self.gen_expr(obj);
                         let class_name = self.infer_class_from_expr(obj);
                         let fallback = self.infer_string_method(obj, method);
-                        let args_part = if arg_strs.is_empty() { String::new() } else { format!(", {}", arg_strs.join(", ")) };
+
+                        // Wrap int args for LemonMap/LemonArray void* params
+                        let (final_args_part, final_obj_str) = if let Some(cn) = &class_name {
+                            if cn == "LemonArray" || cn == "LemonMap" {
+                                let converted_args: Vec<String> = arg_strs.iter().enumerate().map(|(i, a)| {
+                                    if (cn == "LemonMap" && method == "put" && i == 1) ||
+                                       (cn == "LemonArray" && (method == "add" || method == "push")) ||
+                                       (cn == "LemonArray" && method == "set" && i == 1) {
+                                        self.wrap_int_arg_for_void_ptr(a)
+                                    } else {
+                                        a.clone()
+                                    }
+                                }).collect();
+                                let converted_args_part = if converted_args.is_empty() { String::new() } else { format!(", {}", converted_args.join(", ")) };
+                                (converted_args_part, obj_str.clone())
+                            } else {
+                                (if arg_strs.is_empty() { String::new() } else { format!(", {}", arg_strs.join(", ")) }, obj_str.clone())
+                            }
+                        } else {
+                            (if arg_strs.is_empty() { String::new() } else { format!(", {}", arg_strs.join(", ")) }, obj_str.clone())
+                        };
 
                         if let Some(iface_name) = self.infer_interface_from_expr(obj) {
-                            format!("{}->itable_{}->{}({}{})", obj_str, iface_name, method, obj_str, args_part)
+                            format!("{}->itable_{}->{}({}{})", final_obj_str, iface_name, method, final_obj_str, final_args_part)
                         } else if let Some(cn) = &class_name {
                             let mangled = self.resolve_method_overload(cn, method, &arg_strs);
                             let is_static = matches!(obj.as_ref(), Expr::Variable(name) if self.method_signatures.contains_key(name.as_str()) && !self.var_types.contains_key(name.as_str()));
                             if is_static {
-                                format!("{}(NULL{})", mangled, args_part)
+                                format!("{}(NULL{})", mangled, final_args_part)
                             } else if self.is_virtual_method(cn, method, arg_strs.len()) && !matches!(obj.as_ref(), Expr::This | Expr::Super) {
-                                format!("(({}_vtable*){}->vtable)->{}({}{})", cn, obj_str, mangled, obj_str, args_part)
+                                format!("(({}_vtable*){}->vtable)->{}({}{})", cn, final_obj_str, mangled, final_obj_str, final_args_part)
                             } else {
                                 let cast_obj = if cn != self.current_class.as_deref().unwrap_or("") {
-                                    format!("({}*){}", cn, obj_str)
+                                // String is const char* in C, not a struct pointer - don't cast
+                                if cn == "String" {
+                                    final_obj_str.clone()
                                 } else {
-                                    obj_str.clone()
-                                };
-                                format!("{}({}{})", mangled, cast_obj, args_part)
+                                    format!("({}*){}", cn, final_obj_str)
+                                }
+                            } else {
+                                final_obj_str.clone()
+                            };
+                            format!("{}({}{})", mangled, cast_obj, final_args_part)
                             }
                         } else if fallback != "void" {
-                            format!("{}_{}({}{})", fallback, method, obj_str, args_part)
+                            format!("{}_{}({}{})", fallback, method, final_obj_str, final_args_part)
                         } else {
-                            format!("{}_{}({}{})", obj_str, method, obj_str, args_part)
+                            format!("{}_{}({}{})", final_obj_str, method, final_obj_str, final_args_part)
                         }
                     }
                     Expr::Super => {
@@ -1761,19 +1825,33 @@ impl CCodeGen {
                     format!("{}->itable_{}->{}({}{})", obj_str, iface_name, method, obj_str, args_str)
                 } else if let Some(cn) = &class_name {
                     let mangled = self.resolve_method_overload(cn, method, &arg_strs);
-                    if matches!(obj.as_ref(), Expr::Variable(name) if self.method_signatures.contains_key(name)) {
-                        format!("{}(NULL{})", mangled, args_str)
-                    } else if self.is_virtual_method(cn, method, arg_strs.len()) && !matches!(obj.as_ref(), Expr::This | Expr::Super) {
+                    // For builtin container methods that take void* params, wrap integer args
+                    let (final_args_str, final_obj_str) = if cn == "LemonArray" || cn == "LemonMap" {
+                        let converted_args: Vec<String> = arg_strs.iter().map(|a| {
+                            self.wrap_int_arg_for_void_ptr(a)
+                        }).collect();
+                        let converted_args_str = if converted_args.is_empty() { String::new() } else { format!(", {}", converted_args.join(", ")) };
                         let obj_str = self.gen_expr(obj);
-                        format!("(({}_vtable*){}->vtable)->{}({}{})", cn, obj_str, mangled, obj_str, args_str)
+                        (converted_args_str, obj_str)
                     } else {
-                        let obj_str = self.gen_expr(obj);
+                        (args_str.clone(), self.gen_expr(obj))
+                    };
+                    if matches!(obj.as_ref(), Expr::Variable(name) if self.method_signatures.contains_key(name)) {
+                        format!("{}(NULL{})", mangled, final_args_str)
+                    } else if self.is_virtual_method(cn, method, arg_strs.len()) && !matches!(obj.as_ref(), Expr::This | Expr::Super) {
+                        format!("(({}_vtable*){}->vtable)->{}({}{})", cn, final_obj_str, mangled, final_obj_str, final_args_str)
+                    } else {
                         let cast_obj = if cn != self.current_class.as_deref().unwrap_or("") {
-                            format!("({}*){}", cn, obj_str)
+                            // String is const char* in C, not a struct pointer - don't cast
+                            if cn == "String" {
+                                final_obj_str.clone()
+                            } else {
+                                format!("({}*){}", cn, final_obj_str)
+                            }
                         } else {
-                            obj_str.clone()
+                            final_obj_str.clone()
                         };
-                        format!("{}({}{})", mangled, cast_obj, args_str)
+                        format!("{}({}{})", mangled, cast_obj, final_args_str)
                     }
                 } else {
                     let obj_str = self.gen_expr(obj);
@@ -1799,6 +1877,21 @@ impl CCodeGen {
                 }
                 let obj_str = self.gen_expr(obj);
                 let is_ptr = self.is_pointer_expr(obj);
+
+                // If the object is a method call that returns void* (like LemonArray_get),
+                // we need to cast it to the correct type before accessing a field
+                let obj_class = self.infer_class_from_expr(obj);
+                if let Some(cn) = &obj_class {
+                    // Skip builtin container types (they don't have fields accessible via ->)
+                    if cn != "LemonArray" && cn != "LemonMap" && cn != "String"
+                       && cn != "StringBuilder" && cn != "LemonFile" {
+                        // Check if the expression is a method call (returns void* from LemonArray_get)
+                        if matches!(obj.as_ref(), Expr::MethodCall(_, _, _)) {
+                            return format!("(({}*){})->{}", cn, obj_str, field);
+                        }
+                    }
+                }
+
                 let access = if is_ptr { "->" } else { "." };
                 format!("{}{}{}", obj_str, access, field)
             }
@@ -1878,6 +1971,47 @@ impl CCodeGen {
         )
     }
 
+    /// Wrap integer arguments for void* parameters in builtin container methods.
+    /// LemonArray_add/push and LemonMap_put take void* params, but Lemon code
+    /// may pass int/bool values. We need (void*)(intptr_t) casts for those.
+    fn wrap_int_arg_for_void_ptr(&self, arg: &str) -> String {
+        // Check if the argument looks like an integer literal or macro constant
+        let trimmed = arg.trim();
+
+        // Already a pointer cast - leave as is
+        if trimmed.starts_with('(') && trimmed.contains("*)") {
+            return arg.to_string();
+        }
+        // Already a string literal or variable with -> or .
+        if trimmed.starts_with('"') || trimmed.contains("->") || trimmed.contains('.') {
+            return arg.to_string();
+        }
+        // String concatenation function calls
+        if trimmed.starts_with("String_") || trimmed.starts_with("SemanticError_") {
+            return arg.to_string();
+        }
+        // Constructor calls
+        if trimmed.contains("_ctor(") || trimmed.contains("_new(") {
+            return arg.to_string();
+        }
+        // Function calls that return pointers
+        if trimmed.contains('(') && !trimmed.starts_with('(') {
+            // Check if it's a known pointer-returning function
+            if trimmed.starts_with("LemonArray_") || trimmed.starts_with("LemonMap_") {
+                return arg.to_string();
+            }
+        }
+        // Integer literals
+        if trimmed.parse::<i64>().is_ok() {
+            return format!("(void*)(intptr_t){}", arg);
+        }
+        // Macro constants (all uppercase with underscores, possibly with _KIND_ prefix)
+        if trimmed.chars().all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit()) && !trimmed.is_empty() {
+            return format!("(void*)(intptr_t){}", arg);
+        }
+        arg.to_string()
+    }
+
     fn gen_builtin_type_method_call(type_name: &str, method: &str, args: &[String]) -> String {
         match type_name {
             "Array" => format!("LemonArray_{}({})", method, args.join(", ")),
@@ -1892,7 +2026,7 @@ impl CCodeGen {
             Expr::Super => self.parent_class.clone().or(self.current_class.clone()),
             Expr::Variable(name) => self.resolve_class_for_var(name),
             Expr::FieldAccess(obj, field) => {
-                // Check if the field itself has a known type
+                // Check if the field itself has a known type in local scope
                 if let Some(ty) = self.var_types.get(field) {
                     if ty == "LemonArray*" {
                         return Some("LemonArray".to_string());
@@ -1924,7 +2058,43 @@ impl CCodeGen {
                         }
                     }
                 }
-                self.infer_class_from_expr(obj)
+                // Try to infer field type from the object's class
+                let obj_class = self.infer_class_from_expr(obj);
+                if let Some(cn) = &obj_class {
+                    // Check class_fields for the field's type
+                    // Note: class_fields stores (c_type, field_name) tuples
+                    if let Some(fields) = self.class_fields.get(cn) {
+                        for (ftype, fname) in fields {
+                            if fname == field {
+                                if ftype == "LemonArray*" {
+                                    return Some("LemonArray".to_string());
+                                }
+                                if ftype == "LemonMap*" {
+                                    return Some("LemonMap".to_string());
+                                }
+                                if ftype == "StringBuilder*" {
+                                    return Some("StringBuilder".to_string());
+                                }
+                                if ftype == "char*" || ftype == "const char*" {
+                                    return Some("String".to_string());
+                                }
+                                if ftype == "LemonFile*" {
+                                    return Some("LemonFile".to_string());
+                                }
+                                if ftype.ends_with('*') {
+                                    let class_name = &ftype[..ftype.len() - 1];
+                                    if !class_name.is_empty() && !class_name.starts_with("const ") {
+                                        return Some(class_name.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Don't fall back to the object's class - that's wrong for method calls
+                    // e.g., info.methods.get(i) should infer methods as LemonArray, not ClassInfo
+                    return None;
+                }
+                None
             }
             Expr::New(class_name, type_args, _) => {
                 if !type_args.is_empty() {
@@ -1950,10 +2120,68 @@ impl CCodeGen {
                     // Check if calling a method on a known builtin type
                     let obj_class = self.infer_class_from_expr(obj);
                     if let Some(cn) = &obj_class {
-                        if cn == "LemonArray" {
-                            // Array methods that return Array
+                        if cn == "LemonMap" {
+                            // Map methods that return Array
                             if method == "keys" || method == "values" {
                                 return Some("LemonArray".to_string());
+                            }
+                        }
+                        if cn == "LemonArray" {
+                            // Array methods that return Array (e.g., subarray)
+                            if method == "subarray" {
+                                return Some("LemonArray".to_string());
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            // Handle method call chaining: infer return type from MethodCall expressions
+            Expr::MethodCall(obj, method, _args) => {
+                let obj_class = self.infer_class_from_expr(obj);
+                if let Some(cn) = &obj_class {
+                    // Builtin type methods that return known types
+                    if cn == "LemonMap" && (method == "keys" || method == "values") {
+                        return Some("LemonArray".to_string());
+                    }
+                    if cn == "LemonArray" {
+                        // LemonArray_get returns void* which should be cast to the element type
+                        // For now, try to infer from the variable's tracked type
+                        if let Expr::Variable(var_name) = obj.as_ref() {
+                            if let Some(ty) = self.var_types.get(var_name) {
+                                // Check if we can find the element type from class_fields
+                                // e.g., self->variants is LemonArray*, and the class has a field
+                                // that tells us the element type
+                            }
+                        }
+                        // Check if the array is a field of a known class, and infer element type
+                        if let Expr::FieldAccess(field_obj, field_name) = obj.as_ref() {
+                            let field_obj_class = self.infer_class_from_expr(field_obj);
+                            if let Some(fcn) = &field_obj_class {
+                                if let Some(fields) = self.class_fields.get(fcn) {
+                                    for (ftype, fname) in fields {
+                                        if fname == field_name && ftype == "LemonArray*" {
+                                            // We know this is an array but don't know element type
+                                            // Return None and let FieldAccess handle the cast
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if cn == "LemonArray" && method == "subarray" {
+                        return Some("LemonArray".to_string());
+                    }
+                    if cn == "String" && method == "toString" {
+                        return Some("String".to_string());
+                    }
+                    // For class method calls, try to infer return type from method signatures
+                    if let Some(sigs) = self.method_signatures.get(cn) {
+                        for (sig_name, sig_params) in sigs {
+                            if sig_name == method {
+                                // Method exists on this class - return the class name
+                                // so FieldAccess can add the correct cast
+                                return Some(cn.clone());
                             }
                         }
                     }
@@ -1965,22 +2193,30 @@ impl CCodeGen {
     }
 
     fn infer_string_method(&self, obj: &Expr, _method: &str) -> String {
-        if let Expr::Variable(name) = obj {
-            if let Some(ty) = self.var_types.get(name) {
-                if ty == "char*" || ty == "const char*" {
-                    return "String".to_string();
+        match obj {
+            Expr::Variable(name) => {
+                if let Some(ty) = self.var_types.get(name) {
+                    if ty == "char*" || ty == "const char*" {
+                        return "String".to_string();
+                    }
+                    if ty == "LemonArray*" {
+                        return "LemonArray".to_string();
+                    }
+                    if ty == "LemonMap*" {
+                        return "LemonMap".to_string();
+                    }
+                    if ty == "StringBuilder*" {
+                        return "StringBuilder".to_string();
+                    }
+                    if ty == "LemonFile*" {
+                        return "LemonFile".to_string();
+                    }
                 }
-                if ty == "LemonArray*" {
-                    return "LemonArray".to_string();
-                }
-                if ty == "LemonMap*" {
-                    return "LemonMap".to_string();
-                }
-                if ty == "StringBuilder*" {
-                    return "StringBuilder".to_string();
-                }
-                if ty == "LemonFile*" {
-                    return "LemonFile".to_string();
+            }
+            // For method call chaining, use infer_class_from_expr
+            _ => {
+                if let Some(cn) = self.infer_class_from_expr(obj) {
+                    return cn;
                 }
             }
         }
@@ -2794,6 +3030,15 @@ impl CCodeGen {
     }
 
     fn resolve_method_overload(&self, class_name: &str, method_name: &str, arg_strs: &[String]) -> String {
+        // Builtin container types use LemonArray_/LemonMap_ prefix
+        match class_name {
+            "LemonArray" => return format!("LemonArray_{}", method_name),
+            "LemonMap" => return format!("LemonMap_{}", method_name),
+            "StringBuilder" => return format!("StringBuilder_{}", method_name),
+            "LemonFile" => return format!("LemonFile_{}", method_name),
+            "String" => return format!("String_{}", method_name),
+            _ => {}
+        }
         if let Some(sigs) = self.method_signatures.get(class_name) {
             let matching: Vec<&(String, Vec<TypeRef>)> = sigs.iter()
                 .filter(|(name, _)| name == method_name)
@@ -3080,6 +3325,19 @@ impl CCodeGen {
                 if let Some(ty) = self.var_types.get(field) {
                     if ty.contains("char*") || ty.contains("const char*") {
                         return true;
+                    }
+                }
+                // Check class_fields for the field's type
+                let obj_class = self.infer_class_from_expr(obj);
+                if let Some(cn) = &obj_class {
+                    if let Some(fields) = self.class_fields.get(cn) {
+                        for (ftype, fname) in fields {
+                            if fname == field {
+                                if ftype.contains("char*") || ftype.contains("const char*") {
+                                    return true;
+                                }
+                            }
+                        }
                     }
                 }
                 self.expr_is_string_type(obj)

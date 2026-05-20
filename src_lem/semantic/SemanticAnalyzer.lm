@@ -1,0 +1,1122 @@
+package lemon.semantic;
+
+import lemon.parser.AST;
+
+// ============================================================
+// Lemon 语言语义分析器
+// 基于 lemonc/src/ast/semantic.rs 的 Rust 实现
+// 功能：类型检查、继承验证、接口检查、作用域检查
+//
+// 注意：由于 Lemon 编译器 C 代码生成器的限制：
+// 1. LemonArray_get 返回 void*，无法直接链式访问成员
+//    需要先赋值到局部变量再访问
+// 2. Array<int>.get(i) 返回指针而非值，不能直接与 int 比较
+//    需要使用辅助方法
+// 3. errors.get(i).toString() 需要先赋值到局部变量
+// ============================================================
+
+// 类信息（对应 Rust 的 ClassInfo）
+class ClassInfo {
+    public String name;
+    public String parent;               // null 表示无父类
+    public Array<String> implements_;   // 实现的接口列表
+    public Map<String, TypeRef> fields; // 字段名 → 类型
+    public Array<MethodDecl> methods;
+    public bool isAbstract;
+
+    public ClassInfo(String name, String parent, Array<String> implements_,
+                     Map<String, TypeRef> fields, Array<MethodDecl> methods, bool isAbstract) {
+        this.name = name;
+        this.parent = parent;
+        this.implements_ = implements_;
+        this.fields = fields;
+        this.methods = methods;
+        this.isAbstract = isAbstract;
+    }
+
+    // 辅助方法：查找方法
+    public MethodDecl findMethod(String methodName) {
+        for (int i = 0; i < this.methods.size(); i++) {
+            MethodDecl m = this.methods.get(i);
+            if (m.name.equals(methodName)) {
+                return m;
+            }
+        }
+        return null;
+    }
+
+    // 辅助方法：查找方法（带参数匹配）
+    public MethodDecl findMethodWithParams(String methodName, Array<Param> params) {
+        for (int i = 0; i < this.methods.size(); i++) {
+            MethodDecl m = this.methods.get(i);
+            if (m.name.equals(methodName) && m.params.size() == params.size()) {
+                bool allParamsMatch = true;
+                for (int pi = 0; pi < m.params.size(); pi++) {
+                    Param mp = m.params.get(pi);
+                    Param pp = params.get(pi);
+                    if (!SemanticAnalyzer.staticTypesMatch(mp.paramType, pp.paramType)) {
+                        allParamsMatch = false;
+                        break;
+                    }
+                }
+                if (allParamsMatch) return m;
+            }
+        }
+        return null;
+    }
+
+    // 辅助方法：是否有指定修饰符的方法
+    public bool hasAbstractMethod(String methodName) {
+        for (int i = 0; i < this.methods.size(); i++) {
+            MethodDecl m = this.methods.get(i);
+            if (m.name.equals(methodName) && SemanticAnalyzer.staticModifiersContain(m.modifiers, MethodModifier.Abstract)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+// 枚举信息（对应 Rust 的 EnumInfo）
+class EnumInfo {
+    public String name;
+    public Array<EnumVariant> variants;
+
+    public EnumInfo(String name, Array<EnumVariant> variants) {
+        this.name = name;
+        this.variants = variants;
+    }
+
+    // 辅助方法：查找变体
+    public bool hasVariant(String variantName) {
+        for (int i = 0; i < this.variants.size(); i++) {
+            EnumVariant v = this.variants.get(i);
+            if (v.name.equals(variantName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+// 语义分析器
+class SemanticAnalyzer {
+    private Map<String, ClassInfo> classTable;
+    private Map<String, InterfaceDecl> interfaceTable;
+    private Map<String, EnumInfo> enumTable;
+    private Map<String, FunctionDecl> functionTable;
+    private Array<SemanticError> errors;
+    private Array<String> warnings;
+    private String currentClass;
+    private Array<Map<String, TypeRef> > scopeStack;
+
+    public SemanticAnalyzer() {
+        this.classTable = new Map<String, ClassInfo>();
+        this.interfaceTable = new Map<String, InterfaceDecl>();
+        this.enumTable = new Map<String, EnumInfo>();
+        this.functionTable = new Map<String, FunctionDecl>();
+        this.errors = new Array<SemanticError>();
+        this.warnings = new Array<String>();
+        this.currentClass = null;
+        this.scopeStack = new Array<Map<String, TypeRef> >();
+    }
+
+    // ---- 主入口 ----
+
+    public Array<SemanticError> getErrors() {
+        return this.errors;
+    }
+
+    public Array<String> getWarnings() {
+        return this.warnings;
+    }
+
+    public void analyze(Program program) {
+        this.collectDeclarations(program);
+        this.checkInheritance();
+        this.checkInterfaceImplementation();
+        this.checkMembers(program);
+    }
+
+    // ---- 静态辅助方法（供 ClassInfo 使用） ----
+
+    public static bool staticTypesMatch(TypeRef a, TypeRef b) {
+        if (a == null || b == null) return false;
+        if (a.kind == TypeRefKind.Primitive && b.kind == TypeRefKind.Primitive) {
+            return a.primitiveKind == b.primitiveKind;
+        }
+        if (a.kind == TypeRefKind.Named && b.kind == TypeRefKind.Named) {
+            int aLen = a.typeArgs != null ? a.typeArgs.size() : 0;
+            int bLen = b.typeArgs != null ? b.typeArgs.size() : 0;
+            return a.name.equals(b.name) && aLen == bLen;
+        }
+        if (a.kind == TypeRefKind.Array && b.kind == TypeRefKind.Array) {
+            return SemanticAnalyzer.staticTypesMatch(a.elementType, b.elementType);
+        }
+        return false;
+    }
+
+    public static bool staticModifiersContain(Array<int> modifiers, int target) {
+        if (modifiers == null) return false;
+        for (int i = 0; i < modifiers.size(); i++) {
+            int val = modifiers.get(i);
+            if (val == target) return true;
+        }
+        return false;
+    }
+
+    // ---- 第一阶段：收集声明 ----
+
+    private void collectDeclarations(Program program) {
+        for (int i = 0; i < program.declarations.size(); i++) {
+            Declaration decl = program.declarations.get(i);
+            if (decl.kind == DeclKind.Class) {
+                this.collectClassDecl(decl.classDecl);
+            } else if (decl.kind == DeclKind.Interface) {
+                this.collectInterfaceDecl(decl.interfaceDecl);
+            } else if (decl.kind == DeclKind.Enum) {
+                this.collectEnumDecl(decl.enumDecl);
+            } else if (decl.kind == DeclKind.Function) {
+                this.collectFunctionDecl(decl.functionDecl);
+            }
+        }
+    }
+
+    private void collectClassDecl(ClassDecl class_) {
+        if (this.classTable.containsKey(class_.name)) {
+            this.errors.add(SemanticError.duplicateDefinition(class_.name));
+            return;
+        }
+
+        bool isAbstract = this.modifiersContain(class_.modifiers, ClassModifier.Abstract);
+
+        Map<String, TypeRef> fields = new Map<String, TypeRef>();
+        Array<MethodDecl> methods = new Array<MethodDecl>();
+
+        for (int i = 0; i < class_.members.size(); i++) {
+            ClassMember member = class_.members.get(i);
+            if (member.kind == ClassMemberKind.Field) {
+                VarDecl field = member.field;
+                // Check field type
+                this.checkTypeRef(field.varType);
+                if (fields.containsKey(field.name)) {
+                    this.errors.add(SemanticError.duplicateDefinition(field.name));
+                } else {
+                    fields.put(field.name, field.varType);
+                }
+            } else if (member.kind == ClassMemberKind.Method) {
+                MethodDecl method = member.method;
+                bool isDup = this.isMethodDuplicate(methods, method);
+                if (isDup) {
+                    this.errors.add(SemanticError.duplicateDefinition(
+                        class_.name + "." + method.name + "(" + this.paramsToString(method.params) + ")"));
+                } else {
+                    methods.add(method);
+                }
+            }
+        }
+
+        String parent = null;
+        if (class_.extends_ != null && class_.extends_.kind == TypeRefKind.Named) {
+            parent = class_.extends_.name;
+        }
+
+        Array<String> implements_ = new Array<String>();
+        for (int i = 0; i < class_.implements_.size(); i++) {
+            TypeRef iface = class_.implements_.get(i);
+            if (iface.kind == TypeRefKind.Named) {
+                implements_.add(iface.name);
+            }
+        }
+
+        ClassInfo info = new ClassInfo(class_.name, parent, implements_, fields, methods, isAbstract);
+        this.classTable.put(class_.name, info);
+    }
+
+    private void collectInterfaceDecl(InterfaceDecl iface) {
+        if (this.interfaceTable.containsKey(iface.name)) {
+            this.errors.add(SemanticError.duplicateDefinition(iface.name));
+        } else {
+            this.interfaceTable.put(iface.name, iface);
+        }
+    }
+
+    private void collectEnumDecl(EnumDecl enum_) {
+        if (this.enumTable.containsKey(enum_.name)) {
+            this.errors.add(SemanticError.duplicateDefinition(enum_.name));
+        } else {
+            EnumInfo info = new EnumInfo(enum_.name, enum_.variants);
+            this.enumTable.put(enum_.name, info);
+        }
+    }
+
+    private void collectFunctionDecl(FunctionDecl func) {
+        if (this.functionTable.containsKey(func.name)) {
+            this.errors.add(SemanticError.duplicateDefinition(func.name));
+        } else {
+            this.functionTable.put(func.name, func);
+        }
+    }
+
+    // ---- 第二阶段：继承检查 ----
+
+    private void checkInheritance() {
+        // 检查循环继承
+        Array<String> classNames = this.classTable.keys();
+        for (int i = 0; i < classNames.size(); i++) {
+            String name = classNames.get(i);
+            this.checkCircularInheritance(name);
+        }
+
+        // 检查 override 相关问题
+        this.checkOverrideIssues();
+
+        // 检查抽象方法实现
+        this.checkAbstractImplementation();
+    }
+
+    private void checkCircularInheritance(String startName) {
+        Array<String> visited = new Array<String>();
+        String current = startName;
+        int safetyCounter = 0;
+        while (safetyCounter < 1000) {
+            safetyCounter = safetyCounter + 1;
+            // Check if already visited
+            bool alreadyVisited = false;
+            for (int vi = 0; vi < visited.size(); vi++) {
+                String visitedName = visited.get(vi);
+                if (visitedName.equals(current)) {
+                    alreadyVisited = true;
+                    break;
+                }
+            }
+            if (alreadyVisited) {
+                this.errors.add(SemanticError.circularInheritance(current));
+                break;
+            }
+            visited.add(current);
+            ClassInfo info = this.classTable.get(current);
+            if (info == null) break;
+            if (info.parent == null) break;
+            if (!this.classTable.containsKey(info.parent) && !this.isBuiltinType(info.parent)) {
+                this.errors.add(SemanticError.undefinedClass(info.parent));
+                break;
+            }
+            current = info.parent;
+        }
+    }
+
+    private void checkOverrideIssues() {
+        Array<String> classNames = this.classTable.keys();
+        for (int ci = 0; ci < classNames.size(); ci++) {
+            String className = classNames.get(ci);
+            ClassInfo classInfo = this.classTable.get(className);
+            if (classInfo.parent == null) continue;
+            ClassInfo parentInfo = this.classTable.get(classInfo.parent);
+            if (parentInfo == null) continue;
+
+            // 检查字段遮蔽
+            Array<String> fieldNames = classInfo.fields.keys();
+            for (int fi = 0; fi < fieldNames.size(); fi++) {
+                String fieldName = fieldNames.get(fi);
+                if (parentInfo.fields.containsKey(fieldName)) {
+                    this.warnings.add("Field '" + fieldName + "' in '" + className + "' shadows parent field");
+                }
+            }
+
+            // 检查方法 override
+            for (int mi = 0; mi < classInfo.methods.size(); mi++) {
+                MethodDecl method = classInfo.methods.get(mi);
+                bool isOverride = this.methodModifiersContain(method, MethodModifier.Override);
+                bool isVirtual = this.methodModifiersContain(method, MethodModifier.Virtual);
+
+                // 在父类中查找同名同参数方法
+                MethodDecl parentMatch = parentInfo.findMethodWithParams(method.name, method.params);
+
+                if (parentMatch != null) {
+                    if (!isOverride) {
+                        this.warnings.add("Method '" + method.name + "' in '" + className + "' overrides parent method but is not marked @override");
+                    }
+                    if (method.params.size() != parentMatch.params.size()) {
+                        this.errors.add(SemanticError.invalidOverride(className, method.name, "parameter count mismatch"));
+                    }
+                } else if (isOverride) {
+                    this.errors.add(SemanticError.invalidOverride(className, method.name, "no method '" + method.name + "' in parent class"));
+                }
+
+                if (isVirtual && isOverride) {
+                    this.warnings.add("Method '" + method.name + "' in '" + className + "' is both @virtual and @override, @override implies @virtual");
+                }
+            }
+        }
+    }
+
+    private void checkAbstractImplementation() {
+        Array<String> classNames = this.classTable.keys();
+        for (int ci = 0; ci < classNames.size(); ci++) {
+            String className = classNames.get(ci);
+            ClassInfo classInfo = this.classTable.get(className);
+            if (classInfo.isAbstract) continue;
+
+            // 收集所有祖先的抽象方法
+            Array<MethodDecl> abstractMethods = new Array<MethodDecl>();
+            Array<String> visitedAncestors = new Array<String>();
+            String ancestor = classInfo.parent;
+            int ancestorSafety = 0;
+            while (ancestor != null && ancestorSafety < 100) {
+                ancestorSafety = ancestorSafety + 1;
+                // Check for circular inheritance
+                bool alreadyVisitedAncestor = false;
+                for (int va = 0; va < visitedAncestors.size(); va++) {
+                    String visitedName = visitedAncestors.get(va);
+                    if (visitedName.equals(ancestor)) {
+                        alreadyVisitedAncestor = true;
+                        break;
+                    }
+                }
+                if (alreadyVisitedAncestor) break;
+                visitedAncestors.add(ancestor);
+
+                ClassInfo ancestorInfo = this.classTable.get(ancestor);
+                if (ancestorInfo == null) break;
+                for (int mi = 0; mi < ancestorInfo.methods.size(); mi++) {
+                    MethodDecl m = ancestorInfo.methods.get(mi);
+                    if (this.methodModifiersContain(m, MethodModifier.Abstract)) {
+                        abstractMethods.add(m);
+                    }
+                }
+                ancestor = ancestorInfo.parent;
+            }
+
+            // 检查当前类是否实现了所有抽象方法
+            for (int ai = 0; ai < abstractMethods.size(); ai++) {
+                MethodDecl abstractMethod = abstractMethods.get(ai);
+                bool implemented = false;
+                for (int mi = 0; mi < classInfo.methods.size(); mi++) {
+                    MethodDecl m = classInfo.methods.get(mi);
+                    if (m.name.equals(abstractMethod.name) && this.paramsMatch(m.params, abstractMethod.params)) {
+                        implemented = true;
+                        break;
+                    }
+                }
+                if (!implemented) {
+                    this.errors.add(SemanticError.abstractMethodNotImplemented(className, abstractMethod.name));
+                }
+            }
+        }
+    }
+
+    // ---- 第三阶段：接口实现检查 ----
+
+    private void checkInterfaceImplementation() {
+        Array<String> classNames = this.classTable.keys();
+        for (int ci = 0; ci < classNames.size(); ci++) {
+            String className = classNames.get(ci);
+            ClassInfo classInfo = this.classTable.get(className);
+
+            for (int ii = 0; ii < classInfo.implements_.size(); ii++) {
+                String ifaceName = classInfo.implements_.get(ii);
+                InterfaceDecl iface = this.interfaceTable.get(ifaceName);
+                if (iface == null) {
+                    this.errors.add(SemanticError.undefinedType(ifaceName));
+                    continue;
+                }
+
+                for (int mi = 0; mi < iface.members.size(); mi++) {
+                    InterfaceMember member = iface.members.get(mi);
+                    if (member.kind != InterfaceMemberKind.MethodSignature) continue;
+                    MethodSignature sig = member.methodSignature;
+
+                    MethodDecl impl = this.findMethodOverloadInClassHierarchy(className, sig.name, sig.params);
+                    if (impl == null) {
+                        this.errors.add(SemanticError.interfaceMethodNotImplemented(className, ifaceName, sig.name));
+                    } else {
+                        if (!this.typesMatch(impl.returnType, sig.returnType)) {
+                            this.errors.add(SemanticError.interfaceMethodSignatureMismatch(
+                                className, ifaceName, sig.name, "return type mismatch"));
+                        }
+                        if (impl.params.size() != sig.params.size()) {
+                            this.errors.add(SemanticError.interfaceMethodSignatureMismatch(
+                                className, ifaceName, sig.name,
+                                "parameter count mismatch: expected " + String.intToString(sig.params.size()) + ", found " + String.intToString(impl.params.size())));
+                        } else {
+                            for (int pi = 0; pi < impl.params.size(); pi++) {
+                                Param mp = impl.params.get(pi);
+                                Param sp = sig.params.get(pi);
+                                if (!this.typesMatch(mp.paramType, sp.paramType)) {
+                                    this.errors.add(SemanticError.interfaceMethodSignatureMismatch(
+                                        className, ifaceName, sig.name,
+                                        "parameter " + String.intToString(pi) + " type mismatch"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- 第四阶段：成员检查（作用域和类型） ----
+
+    private void checkMembers(Program program) {
+        for (int i = 0; i < program.declarations.size(); i++) {
+            Declaration decl = program.declarations.get(i);
+            if (decl.kind == DeclKind.Class) {
+                this.checkClassMembers(decl.classDecl);
+            } else if (decl.kind == DeclKind.Function) {
+                this.checkFunctionMembers(decl.functionDecl);
+            }
+        }
+    }
+
+    private void checkClassMembers(ClassDecl class_) {
+        this.currentClass = class_.name;
+        this.scopeStack = new Array<Map<String, TypeRef> >();
+        this.pushScope();
+
+        ClassInfo info = this.classTable.get(class_.name);
+        if (info != null) {
+            Array<String> fieldNames = info.fields.keys();
+            for (int fi = 0; fi < fieldNames.size(); fi++) {
+                String fieldName = fieldNames.get(fi);
+                TypeRef fieldType = info.fields.get(fieldName);
+                this.defineVar(fieldName, fieldType);
+            }
+        }
+
+        this.defineVar("this", TypeRef.makeNamed(class_.name, new Array<TypeRef>()));
+        this.defineVar("super", TypeRef.makeNamed(class_.name, new Array<TypeRef>()));
+
+        for (int mi = 0; mi < class_.members.size(); mi++) {
+            ClassMember member = class_.members.get(mi);
+            if (member.kind == ClassMemberKind.Method) {
+                MethodDecl method = member.method;
+                if (method.body != null) {
+                    this.pushScope();
+                    for (int pi = 0; pi < method.params.size(); pi++) {
+                        Param param = method.params.get(pi);
+                        this.defineVar(param.name, param.paramType);
+                    }
+                    this.checkBlock(method.body);
+                    this.popScope();
+                }
+            } else if (member.kind == ClassMemberKind.Constructor) {
+                ConstructorDecl ctor = member.constructor;
+                this.pushScope();
+                for (int pi = 0; pi < ctor.params.size(); pi++) {
+                    Param param = ctor.params.get(pi);
+                    this.defineVar(param.name, param.paramType);
+                }
+                this.checkBlock(ctor.body);
+                this.popScope();
+            } else if (member.kind == ClassMemberKind.Destructor) {
+                this.checkBlock(member.destructor.body);
+            } else if (member.kind == ClassMemberKind.Field) {
+                VarDecl field = member.field;
+                if (field.initializer != null) {
+                    this.checkExpr(field.initializer);
+                }
+            }
+        }
+
+        this.popScope();
+        this.currentClass = null;
+    }
+
+    private void checkFunctionMembers(FunctionDecl func) {
+        this.scopeStack = new Array<Map<String, TypeRef> >();
+        this.pushScope();
+        for (int pi = 0; pi < func.params.size(); pi++) {
+            Param param = func.params.get(pi);
+            this.defineVar(param.name, param.paramType);
+        }
+        this.checkBlock(func.body);
+        this.popScope();
+    }
+
+    // ---- 语句检查 ----
+
+    private void checkBlock(Block block) {
+        this.pushScope();
+        for (int i = 0; i < block.statements.size(); i++) {
+            this.checkStmt(block.statements.get(i));
+        }
+        this.popScope();
+    }
+
+    private void checkStmt(Stmt stmt) {
+        if (stmt.kind == StmtKind.VarDecl) {
+            this.checkTypeRef(stmt.varDecl.varType);
+            if (stmt.varDecl.initializer != null) {
+                this.checkExpr(stmt.varDecl.initializer);
+            }
+            this.defineVar(stmt.varDecl.name, stmt.varDecl.varType);
+        } else if (stmt.kind == StmtKind.Return) {
+            if (stmt.returnValue != null) {
+                this.checkExpr(stmt.returnValue);
+            }
+        } else if (stmt.kind == StmtKind.Expr) {
+            this.checkExpr(stmt.expr);
+        } else if (stmt.kind == StmtKind.If) {
+            this.checkExpr(stmt.condition);
+            this.checkStmt(stmt.thenBranch);
+            if (stmt.elseBranch != null) {
+                this.checkStmt(stmt.elseBranch);
+            }
+        } else if (stmt.kind == StmtKind.While) {
+            this.checkExpr(stmt.condition);
+            this.checkStmt(stmt.body);
+        } else if (stmt.kind == StmtKind.For) {
+            if (stmt.init != null) {
+                this.checkStmt(stmt.init);
+            }
+            if (stmt.forCond != null) {
+                this.checkExpr(stmt.forCond);
+            }
+            if (stmt.update != null) {
+                this.checkExpr(stmt.update);
+            }
+            this.checkStmt(stmt.body);
+        } else if (stmt.kind == StmtKind.Block) {
+            this.checkBlock(new Block(stmt.statements));
+        } else if (stmt.kind == StmtKind.Try) {
+            this.checkBlock(stmt.tryBlock);
+            for (int ci = 0; ci < stmt.catchClauses.size(); ci++) {
+                CatchClause catch_ = stmt.catchClauses.get(ci);
+                this.checkTypeRef(catch_.varType);
+                this.checkBlock(catch_.body);
+            }
+            if (stmt.finallyBlock != null) {
+                this.checkBlock(stmt.finallyBlock);
+            }
+        } else if (stmt.kind == StmtKind.ForEach) {
+            this.checkTypeRef(stmt.forEachType);
+            this.checkExpr(stmt.forEachIterable);
+            this.pushScope();
+            this.defineVar(stmt.forEachVarName, stmt.forEachType);
+            this.checkStmt(stmt.body);
+            this.popScope();
+        } else if (stmt.kind == StmtKind.Switch) {
+            this.checkExpr(stmt.switchExpr);
+            for (int ci = 0; ci < stmt.cases.size(); ci++) {
+                SwitchCase case_ = stmt.cases.get(ci);
+                for (int pi = 0; pi < case_.patterns.size(); pi++) {
+                    this.checkExpr(case_.patterns.get(pi));
+                }
+                this.checkBlock(case_.body);
+            }
+            if (stmt.defaultBlock != null) {
+                this.checkBlock(stmt.defaultBlock);
+            }
+        }
+    }
+
+    // ---- 表达式检查 ----
+
+    private void checkExpr(Expr expr) {
+        if (expr == null) return;
+
+        if (expr.kind == ExprKind.Variable) {
+            String name = expr.strValue;
+            if (!this.lookupVar(name) && !this.isBuiltinFunc(name)) {
+                if (this.currentClass != null && this.currentClass.equals(name)) {
+                    return;
+                }
+                if (this.currentClass != null && this.classHasField(this.currentClass, name)) {
+                    return;
+                }
+                if (this.classTable.containsKey(name) || this.isBuiltinType(name)) {
+                    return;
+                }
+                this.errors.add(SemanticError.undefinedVariable(name));
+            }
+        } else if (expr.kind == ExprKind.BinaryOp) {
+            this.checkExpr(expr.left);
+            this.checkExpr(expr.right);
+        } else if (expr.kind == ExprKind.UnaryOp) {
+            this.checkExpr(expr.operand);
+        } else if (expr.kind == ExprKind.Assignment) {
+            this.checkExpr(expr.target);
+            this.checkExpr(expr.value);
+        } else if (expr.kind == ExprKind.Call) {
+            if (expr.callee.kind == ExprKind.Variable) {
+                String calleeName = expr.callee.strValue;
+                if (this.isBuiltinFunc(calleeName)) {
+                    for (int ai = 0; ai < expr.args.size(); ai++) {
+                        this.checkExpr(expr.args.get(ai));
+                    }
+                    if (this.isSystemMethod(calleeName)) {
+                        this.warnings.add("Bare function call '" + calleeName + "' - consider using 'System." + calleeName + "()' instead");
+                    }
+                    return;
+                }
+                if (this.currentClass != null && this.classHasMethod(this.currentClass, calleeName)) {
+                    this.errors.add(SemanticError.bareMethodCall(calleeName, this.currentClass));
+                }
+            }
+            if (expr.callee.kind == ExprKind.FieldAccess) {
+                Expr obj = expr.callee.receiver;
+                String methodName = expr.callee.strValue;
+                if (obj.kind == ExprKind.Variable) {
+                    String varName = obj.strValue;
+                    if (this.classTable.containsKey(varName) || this.isBuiltinType(varName)) {
+                        if (!this.classHasMethod(varName, methodName) && !this.isBuiltinTypeMethod(varName, methodName)) {
+                            this.errors.add(SemanticError.undefinedMethod(varName, methodName));
+                        }
+                    }
+                } else if (obj.kind == ExprKind.This) {
+                    if (this.currentClass != null) {
+                        if (!this.classHasMethod(this.currentClass, methodName)) {
+                            this.errors.add(SemanticError.undefinedMethod(this.currentClass, methodName));
+                        }
+                    }
+                }
+            }
+            this.checkExpr(expr.callee);
+            for (int ai = 0; ai < expr.args.size(); ai++) {
+                this.checkExpr(expr.args.get(ai));
+            }
+        } else if (expr.kind == ExprKind.MethodCall) {
+            this.checkExpr(expr.receiver);
+            for (int ai = 0; ai < expr.args.size(); ai++) {
+                this.checkExpr(expr.args.get(ai));
+            }
+            String methodName = expr.strValue;
+            if (expr.receiver.kind == ExprKind.Variable) {
+                String varName = expr.receiver.strValue;
+                String resolvedClass = this.resolveVarClass(varName);
+                if (resolvedClass != null) {
+                    if (!this.classHasMethod(resolvedClass, methodName)) {
+                        this.errors.add(SemanticError.undefinedMethod(resolvedClass, methodName));
+                    }
+                } else if (varName.equals("this") || varName.equals("super")) {
+                    if (this.currentClass != null) {
+                        if (!this.classHasMethod(this.currentClass, methodName)) {
+                            this.errors.add(SemanticError.undefinedMethod(this.currentClass, methodName));
+                        }
+                    }
+                } else if (this.classTable.containsKey(varName) || this.isBuiltinType(varName)) {
+                    if (!this.classHasMethod(varName, methodName) && !this.isBuiltinTypeMethod(varName, methodName)) {
+                        this.errors.add(SemanticError.undefinedMethod(varName, methodName));
+                    }
+                }
+            }
+        } else if (expr.kind == ExprKind.FieldAccess) {
+            this.checkExpr(expr.receiver);
+            String fieldName = expr.strValue;
+            if (expr.receiver.kind == ExprKind.Variable) {
+                String varName = expr.receiver.strValue;
+                String resolvedClass = this.resolveVarClass(varName);
+                if (resolvedClass != null) {
+                    if (!this.classHasField(resolvedClass, fieldName) &&
+                        !this.classHasMethod(resolvedClass, fieldName)) {
+                        this.errors.add(SemanticError.undefinedMethod(resolvedClass, fieldName));
+                    }
+                } else if (this.classTable.containsKey(varName) || this.isBuiltinType(varName)) {
+                    if (!this.classHasField(varName, fieldName) &&
+                        !this.classHasMethod(varName, fieldName) &&
+                        !this.isBuiltinTypeMethod(varName, fieldName)) {
+                        this.errors.add(SemanticError.undefinedMethod(varName, fieldName));
+                    }
+                }
+            }
+        } else if (expr.kind == ExprKind.New) {
+            String className = expr.strValue;
+            if (!this.classTable.containsKey(className) && !this.isBuiltinType(className)) {
+                this.errors.add(SemanticError.undefinedClass(className));
+            }
+            if (expr.typeArgs != null) {
+                for (int ti = 0; ti < expr.typeArgs.size(); ti++) {
+                    this.checkTypeRef(expr.typeArgs.get(ti));
+                }
+            }
+            for (int ai = 0; ai < expr.args.size(); ai++) {
+                this.checkExpr(expr.args.get(ai));
+            }
+        } else if (expr.kind == ExprKind.ArrayAccess) {
+            this.checkExpr(expr.receiver);
+            this.checkExpr(expr.index);
+        } else if (expr.kind == ExprKind.Cast) {
+            this.checkTypeRef(expr.castType);
+            this.checkExpr(expr.operand);
+        } else if (expr.kind == ExprKind.InstanceOf) {
+            this.checkExpr(expr.receiver);
+            this.checkTypeRef(expr.typeRef);
+        } else if (expr.kind == ExprKind.Delete) {
+            this.checkExpr(expr.operand);
+        } else if (expr.kind == ExprKind.Ternary) {
+            this.checkExpr(expr.condition);
+            this.checkExpr(expr.thenExpr);
+            this.checkExpr(expr.elseExpr);
+        } else if (expr.kind == ExprKind.Sizeof) {
+            this.checkTypeRef(expr.castType);
+        } else if (expr.kind == ExprKind.TypeId) {
+            this.checkExpr(expr.operand);
+        } else if (expr.kind == ExprKind.Lambda) {
+            if (expr.lambdaParams != null) {
+                for (int pi = 0; pi < expr.lambdaParams.size(); pi++) {
+                    Param p = expr.lambdaParams.get(pi);
+                    this.checkTypeRef(p.paramType);
+                }
+            }
+        } else if (expr.kind == ExprKind.Throw) {
+            this.checkExpr(expr.operand);
+        } else if (expr.kind == ExprKind.Match) {
+            this.checkExpr(expr.matchExpr);
+            for (int ai = 0; ai < expr.matchArms.size(); ai++) {
+                MatchArm arm = expr.matchArms.get(ai);
+                this.checkMatchPattern(arm.pattern);
+                if (arm.body.kind == MatchBodyKind.Expr) {
+                    this.checkExpr(arm.body.expr);
+                } else if (arm.body.kind == MatchBodyKind.Block) {
+                    this.checkBlock(arm.body.block);
+                }
+            }
+        }
+    }
+
+    // ---- 类型引用检查 ----
+
+    private void checkTypeRef(TypeRef typeRef) {
+        if (typeRef == null) return;
+        if (typeRef.kind == TypeRefKind.Named) {
+            if (!this.classTable.containsKey(typeRef.name) &&
+                !this.interfaceTable.containsKey(typeRef.name) &&
+                !this.isBuiltinType(typeRef.name)) {
+                this.errors.add(SemanticError.undefinedType(typeRef.name));
+            }
+        } else if (typeRef.kind == TypeRefKind.Array) {
+            this.checkTypeRef(typeRef.elementType);
+        } else if (typeRef.kind == TypeRefKind.FunctionPtr) {
+            this.checkTypeRef(typeRef.returnType);
+            if (typeRef.paramTypes != null) {
+                for (int pi = 0; pi < typeRef.paramTypes.size(); pi++) {
+                    TypeRef pt = typeRef.paramTypes.get(pi);
+                    this.checkTypeRef(pt);
+                }
+            }
+        }
+    }
+
+    // ---- Match 模式检查 ----
+
+    private void checkMatchPattern(MatchPattern pattern) {
+        if (pattern.kind == MatchPatternKind.Variant) {
+            bool found = false;
+            Array<String> enumNames = this.enumTable.keys();
+            for (int ei = 0; ei < enumNames.size(); ei++) {
+                EnumInfo enumInfo = this.enumTable.get(enumNames.get(ei));
+                if (enumInfo.hasVariant(pattern.name)) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                this.errors.add(SemanticError.undefinedVariant("", pattern.name));
+            }
+            if (pattern.bindings != null) {
+                for (int bi = 0; bi < pattern.bindings.size(); bi++) {
+                    MatchBinding binding = pattern.bindings.get(bi);
+                    this.checkTypeRef(binding.fieldType);
+                }
+            }
+        } else if (pattern.kind == MatchPatternKind.Literal) {
+            this.checkExpr(pattern.literalExpr);
+        } else if (pattern.kind == MatchPatternKind.Or) {
+            for (int pi = 0; pi < pattern.patterns.size(); pi++) {
+                MatchPattern p = pattern.patterns.get(pi);
+                this.checkMatchPattern(p);
+            }
+        }
+    }
+
+    // ---- 作用域管理 ----
+
+    private void pushScope() {
+        this.scopeStack.add(new Map<String, TypeRef>());
+    }
+
+    private void popScope() {
+        if (this.scopeStack.size() > 0) {
+            this.scopeStack.removeAt(this.scopeStack.size() - 1);
+        }
+    }
+
+    private void defineVar(String name, TypeRef typeRef) {
+        if (this.scopeStack.size() > 0) {
+            Map<String, TypeRef> scope = this.scopeStack.get(this.scopeStack.size() - 1);
+            scope.put(name, typeRef);
+        }
+    }
+
+    private bool lookupVar(String name) {
+        for (int i = this.scopeStack.size() - 1; i >= 0; i--) {
+            Map<String, TypeRef> scope = this.scopeStack.get(i);
+            if (scope.containsKey(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String resolveVarClass(String varName) {
+        for (int i = this.scopeStack.size() - 1; i >= 0; i--) {
+            Map<String, TypeRef> scope = this.scopeStack.get(i);
+            if (scope.containsKey(varName)) {
+                TypeRef typeRef = scope.get(varName);
+                if (typeRef.kind == TypeRefKind.Named) {
+                    if (this.classTable.containsKey(typeRef.name)) {
+                        return typeRef.name;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    // ---- 类方法/字段查找 ----
+
+    private bool classHasMethod(String className, String methodName) {
+        ClassInfo info = this.classTable.get(className);
+        if (info == null) return false;
+        MethodDecl found = info.findMethod(methodName);
+        if (found != null) return true;
+        if (info.parent != null) {
+            return this.classHasMethod(info.parent, methodName);
+        }
+        return false;
+    }
+
+    private bool classHasField(String className, String fieldName) {
+        ClassInfo info = this.classTable.get(className);
+        if (info == null) return false;
+        if (info.fields.containsKey(fieldName)) {
+            return true;
+        }
+        if (info.parent != null) {
+            return this.classHasField(info.parent, fieldName);
+        }
+        return false;
+    }
+
+    private MethodDecl findMethodOverloadInClassHierarchy(String className, String methodName, Array<Param> params) {
+        ClassInfo info = this.classTable.get(className);
+        if (info == null) return null;
+        MethodDecl method = info.findMethodWithParams(methodName, params);
+        if (method != null) return method;
+        if (info.parent != null) {
+            return this.findMethodOverloadInClassHierarchy(info.parent, methodName, params);
+        }
+        return null;
+    }
+
+    // ---- 类型匹配 ----
+
+    private bool typesMatch(TypeRef a, TypeRef b) {
+        if (a == null || b == null) return a == null && b == null;
+        if (a.kind == TypeRefKind.Primitive && b.kind == TypeRefKind.Primitive) {
+            return a.primitiveKind == b.primitiveKind;
+        }
+        if (a.kind == TypeRefKind.Named && b.kind == TypeRefKind.Named) {
+            return a.name.equals(b.name);
+        }
+        if (a.kind == TypeRefKind.Array && b.kind == TypeRefKind.Array) {
+            return this.typesMatch(a.elementType, b.elementType);
+        }
+        return false;
+    }
+
+    private bool paramsMatch(Array<Param> a, Array<Param> b) {
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            Param pa = a.get(i);
+            Param pb = b.get(i);
+            if (!this.typesMatch(pa.paramType, pb.paramType)) return false;
+        }
+        return true;
+    }
+
+    // ---- 修饰符检查 ----
+
+    private bool modifiersContain(Array<int> modifiers, int target) {
+        if (modifiers == null) return false;
+        for (int i = 0; i < modifiers.size(); i++) {
+            int val = modifiers.get(i);
+            if (val == target) return true;
+        }
+        return false;
+    }
+
+    private bool methodModifiersContain(MethodDecl method, int target) {
+        return this.modifiersContain(method.modifiers, target);
+    }
+
+    // ---- 方法重复检查 ----
+
+    private bool isMethodDuplicate(Array<MethodDecl> methods, MethodDecl newMethod) {
+        for (int i = 0; i < methods.size(); i++) {
+            MethodDecl m = methods.get(i);
+            if (m.name.equals(newMethod.name) && m.params.size() == newMethod.params.size()) {
+                bool allMatch = true;
+                for (int pi = 0; pi < m.params.size(); pi++) {
+                    Param mp = m.params.get(pi);
+                    Param np = newMethod.params.get(pi);
+                    if (!SemanticAnalyzer.staticTypesMatch(mp.paramType, np.paramType)) {
+                        allMatch = false;
+                        break;
+                    }
+                }
+                if (allMatch) return true;
+            }
+        }
+        return false;
+    }
+
+    // ---- 内置类型/函数判断 ----
+
+    private bool isBuiltinType(String name) {
+        return name.equals("int") || name.equals("long") || name.equals("float") ||
+               name.equals("double") || name.equals("bool") || name.equals("void") ||
+               name.equals("byte") || name.equals("char") || name.equals("short") ||
+               name.equals("String") || name.equals("TypeInfo") || name.equals("Array") ||
+               name.equals("Map") || name.equals("List") || name.equals("Pair") ||
+               name.equals("Optional") || name.equals("Result") || name.equals("Set") ||
+               name.equals("Queue") || name.equals("Stack") || name.equals("HashMap") ||
+               name.equals("HashSet") || name.equals("LinkedList") || name.equals("Tuple") ||
+               name.equals("System") || name.equals("StringBuilder") || name.equals("Character") ||
+               name.equals("File") || this.enumTable.containsKey(name);
+    }
+
+    private bool isBuiltinFunc(String name) {
+        return name.equals("printf") || name.equals("malloc") || name.equals("free") ||
+               name.equals("sizeof") || name.equals("exit") || name.equals("abort") ||
+               name.equals("memcpy") || name.equals("memset") || name.equals("strlen") ||
+               name.equals("strcmp") || name.equals("strdup") || name.equals("type_of") ||
+               name.equals("gc_init") || name.equals("gc_mark") || name.equals("gc_sweep") ||
+               name.equals("gc_alloc") || name.equals("scanf") || name.equals("sprintf") ||
+               name.equals("sscanf") || name.equals("getchar") || name.equals("putchar") ||
+               name.equals("fopen") || name.equals("fclose") || name.equals("fprintf") ||
+               name.equals("fscanf") || name.equals("fgets") || name.equals("fputs") ||
+               name.equals("feof") || name.equals("ferror") || name.equals("fflush") ||
+               name.equals("stdin") || name.equals("stdout") || name.equals("stderr") ||
+               name.equals("rand") || name.equals("srand") || name.equals("time") ||
+               name.equals("clock") || name.equals("sin") || name.equals("cos") ||
+               name.equals("tan") || name.equals("sqrt") || name.equals("pow") ||
+               name.equals("log") || name.equals("log10") || name.equals("exp") ||
+               name.equals("fabs") || name.equals("ceil") || name.equals("floor") ||
+               name.equals("round") || name.equals("fmod") || name.equals("system") ||
+               name.equals("getenv") || name.equals("getpid") || name.equals("getppid") ||
+               name.equals("LemonArray_new") || name.equals("LemonArray_add") ||
+               name.equals("LemonArray_get") || name.equals("LemonArray_set") ||
+               name.equals("LemonArray_size") || name.equals("LemonArray_removeAt") ||
+               name.equals("LemonArray_ensureCapacity") || name.equals("LemonMap_new") ||
+               name.equals("LemonMap_put") || name.equals("LemonMap_get") ||
+               name.equals("LemonMap_size") || name.equals("LemonMap_containsKey") ||
+               name.equals("LemonMap_remove");
+    }
+
+    private bool isSystemMethod(String name) {
+        return name.equals("printf") || name.equals("fprintf") || name.equals("sprintf") ||
+               name.equals("snprintf") || name.equals("vsnprintf") || name.equals("malloc") ||
+               name.equals("free") || name.equals("realloc") || name.equals("calloc") ||
+               name.equals("exit") || name.equals("abort") || name.equals("memcpy") ||
+               name.equals("memset") || name.equals("memmove") || name.equals("strlen") ||
+               name.equals("strcmp") || name.equals("strncmp") || name.equals("strdup") ||
+               name.equals("strstr") || name.equals("fopen") || name.equals("fclose") ||
+               name.equals("fread") || name.equals("fwrite") || name.equals("fseek") ||
+               name.equals("ftell") || name.equals("fgets") || name.equals("fputs") ||
+               name.equals("fputc") || name.equals("fgetc") || name.equals("ungetc") ||
+               name.equals("feof") || name.equals("ferror") || name.equals("fflush") ||
+               name.equals("scanf") || name.equals("sscanf") || name.equals("getchar") ||
+               name.equals("putchar") || name.equals("rand") || name.equals("srand") ||
+               name.equals("time") || name.equals("clock") || name.equals("sin") ||
+               name.equals("cos") || name.equals("tan") || name.equals("sqrt") ||
+               name.equals("pow") || name.equals("log") || name.equals("log10") ||
+               name.equals("exp") || name.equals("fabs") || name.equals("ceil") ||
+               name.equals("floor") || name.equals("round") || name.equals("fmod") ||
+               name.equals("system") || name.equals("getenv") || name.equals("getpid") ||
+               name.equals("getppid") || name.equals("gc_init") || name.equals("gc_mark") ||
+               name.equals("gc_sweep") || name.equals("gc_alloc") || name.equals("type_of");
+    }
+
+    private bool isBuiltinTypeMethod(String typeName, String methodName) {
+        if (typeName.equals("System")) {
+            return this.isSystemMethod(methodName);
+        }
+        if (typeName.equals("String")) {
+            return methodName.equals("length") || methodName.equals("charAt") ||
+                   methodName.equals("substring") || methodName.equals("indexOf") ||
+                   methodName.equals("lastIndexOf") || methodName.equals("contains") ||
+                   methodName.equals("startsWith") || methodName.equals("endsWith") ||
+                   methodName.equals("trim") || methodName.equals("toLowerCase") ||
+                   methodName.equals("toUpperCase") || methodName.equals("replace") ||
+                   methodName.equals("split") || methodName.equals("toInt") ||
+                   methodName.equals("toDouble") || methodName.equals("toLong") ||
+                   methodName.equals("toFloat") || methodName.equals("equals") ||
+                   methodName.equals("compareTo") || methodName.equals("concat") ||
+                   methodName.equals("isEmpty") || methodName.equals("intToString") ||
+                   methodName.equals("longToString") || methodName.equals("doubleToString") ||
+                   methodName.equals("fromChar") || methodName.equals("fromCharArray") ||
+                   methodName.equals("toCharArray") || methodName.equals("toString") ||
+                   methodName.equals("join");
+        }
+        if (typeName.equals("Character")) {
+            return methodName.equals("isDigit") || methodName.equals("isAlpha") ||
+                   methodName.equals("isAlphaNumeric") || methodName.equals("isWhitespace") ||
+                   methodName.equals("isUpper") || methodName.equals("isLower") ||
+                   methodName.equals("toUpperCase") || methodName.equals("toLowerCase") ||
+                   methodName.equals("toInt") || methodName.equals("fromInt");
+        }
+        if (typeName.equals("StringBuilder")) {
+            return methodName.equals("append") || methodName.equals("appendChar") ||
+                   methodName.equals("appendInt") || methodName.equals("appendLong") ||
+                   methodName.equals("appendDouble") || methodName.equals("appendBool") ||
+                   methodName.equals("toString") || methodName.equals("length") ||
+                   methodName.equals("clear") || methodName.equals("capacity");
+        }
+        if (typeName.equals("File")) {
+            return methodName.equals("readAll") || methodName.equals("writeAll") ||
+                   methodName.equals("exists") || methodName.equals("delete");
+        }
+        if (typeName.equals("Array")) {
+            return methodName.equals("size") || methodName.equals("length") ||
+                   methodName.equals("add") || methodName.equals("push") ||
+                   methodName.equals("get") || methodName.equals("set") ||
+                   methodName.equals("removeAt") || methodName.equals("clear") ||
+                   methodName.equals("contains") || methodName.equals("indexOf") ||
+                   methodName.equals("isEmpty");
+        }
+        if (typeName.equals("Map") || typeName.equals("HashMap")) {
+            return methodName.equals("size") || methodName.equals("put") ||
+                   methodName.equals("get") || methodName.equals("containsKey") ||
+                   methodName.equals("remove") || methodName.equals("clear") ||
+                   methodName.equals("isEmpty") || methodName.equals("keys") ||
+                   methodName.equals("values");
+        }
+        if (typeName.equals("List") || typeName.equals("LinkedList")) {
+            return methodName.equals("size") || methodName.equals("add") ||
+                   methodName.equals("get") || methodName.equals("set") ||
+                   methodName.equals("remove") || methodName.equals("clear") ||
+                   methodName.equals("contains") || methodName.equals("indexOf") ||
+                   methodName.equals("isEmpty");
+        }
+        if (typeName.equals("Set") || typeName.equals("HashSet")) {
+            return methodName.equals("size") || methodName.equals("add") ||
+                   methodName.equals("remove") || methodName.equals("contains") ||
+                   methodName.equals("clear") || methodName.equals("isEmpty");
+        }
+        return false;
+    }
+
+    // ---- 辅助方法 ----
+
+    private String paramsToString(Array<Param> params) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < params.size(); i++) {
+            if (i > 0) sb.append(", ");
+            Param p = params.get(i);
+            sb.append(p.paramType.toString());
+        }
+        return sb.toString();
+    }
+}

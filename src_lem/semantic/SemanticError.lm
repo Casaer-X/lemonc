@@ -1,0 +1,269 @@
+package lemon.semantic;
+
+// ============================================================
+// 语义分析错误类型定义
+// 基于 lemonc/src/ast/semantic.rs 的 SemanticError 枚举
+// 使用 kind 常量 + 字段模式（与 AST.lm 相同风格）
+// ============================================================
+
+class SemanticErrorKind {
+    public static int UndefinedType = 0;
+    public static int UndefinedVariable = 1;
+    public static int UndefinedMethod = 2;
+    public static int UndefinedClass = 3;
+    public static int DuplicateDefinition = 4;
+    public static int TypeMismatch = 5;
+    public static int NotAClass = 6;
+    public static int CircularInheritance = 7;
+    public static int MissingOverride = 8;
+    public static int InvalidOverride = 9;
+    public static int AbstractMethodNotImplemented = 10;
+    public static int FieldShadowing = 11;
+    public static int InvalidAccess = 12;
+    public static int InterfaceMethodNotImplemented = 13;
+    public static int InterfaceMethodSignatureMismatch = 14;
+    public static int BareMethodCall = 15;
+    public static int UndefinedEnum = 16;
+    public static int UndefinedVariant = 17;
+    public static int NonExhaustiveMatch = 18;
+}
+
+// 语义错误：所有变体共用一个 class，kind 区分变体
+// strValue 复用于：
+//   UndefinedType(name), UndefinedVariable(name), UndefinedClass(name),
+//   DuplicateDefinition(name), NotAClass(name), CircularInheritance(className),
+//   MissingOverride(methodName), InvalidOverride(methodName),
+//   AbstractMethodNotImplemented(methodName), FieldShadowing(fieldName),
+//   InvalidAccess(member), BareMethodCall(methodName), UndefinedEnum(name),
+//   UndefinedVariant(variantName)
+// strValue2 复用于：
+//   UndefinedMethod(className), InvalidOverride(reason),
+//   InterfaceMethodSignatureMismatch(reason), NonExhaustiveMatch(missingVariants)
+// strValue3 复用于：
+//   UndefinedMethod(methodName), InterfaceMethodNotImplemented(interfaceName),
+//   InterfaceMethodSignatureMismatch(interfaceName)
+// strValue4 复用于：
+//   InterfaceMethodNotImplemented(methodName),
+//   InterfaceMethodSignatureMismatch(methodName)
+// expectedType / foundType 用于 TypeMismatch
+class SemanticError {
+    public int kind;
+
+    // 通用字符串字段 1
+    public String strValue;
+    // 通用字符串字段 2
+    public String strValue2;
+    // 通用字符串字段 3
+    public String strValue3;
+    // 通用字符串字段 4
+    public String strValue4;
+
+    // TypeMismatch 专用
+    public String expectedType;
+    public String foundType;
+
+    public SemanticError(int k) {
+        this.kind = k;
+        this.strValue = "";
+        this.strValue2 = "";
+        this.strValue3 = "";
+        this.strValue4 = "";
+        this.expectedType = "";
+        this.foundType = "";
+    }
+
+    // ---- 工厂方法 ----
+
+    public static SemanticError undefinedType(String name) {
+        SemanticError e = new SemanticError(SemanticErrorKind.UndefinedType);
+        e.strValue = name;
+        return e;
+    }
+
+    public static SemanticError undefinedVariable(String name) {
+        SemanticError e = new SemanticError(SemanticErrorKind.UndefinedVariable);
+        e.strValue = name;
+        return e;
+    }
+
+    public static SemanticError undefinedMethod(String className, String methodName) {
+        SemanticError e = new SemanticError(SemanticErrorKind.UndefinedMethod);
+        e.strValue = className;
+        e.strValue2 = methodName;
+        return e;
+    }
+
+    public static SemanticError undefinedClass(String name) {
+        SemanticError e = new SemanticError(SemanticErrorKind.UndefinedClass);
+        e.strValue = name;
+        return e;
+    }
+
+    public static SemanticError duplicateDefinition(String name) {
+        SemanticError e = new SemanticError(SemanticErrorKind.DuplicateDefinition);
+        e.strValue = name;
+        return e;
+    }
+
+    public static SemanticError typeMismatch(String expected, String found) {
+        SemanticError e = new SemanticError(SemanticErrorKind.TypeMismatch);
+        e.expectedType = expected;
+        e.foundType = found;
+        return e;
+    }
+
+    public static SemanticError notAClass(String name) {
+        SemanticError e = new SemanticError(SemanticErrorKind.NotAClass);
+        e.strValue = name;
+        return e;
+    }
+
+    public static SemanticError circularInheritance(String className) {
+        SemanticError e = new SemanticError(SemanticErrorKind.CircularInheritance);
+        e.strValue = className;
+        return e;
+    }
+
+    public static SemanticError missingOverride(String className, String methodName) {
+        SemanticError e = new SemanticError(SemanticErrorKind.MissingOverride);
+        e.strValue = className;
+        e.strValue2 = methodName;
+        return e;
+    }
+
+    public static SemanticError invalidOverride(String className, String methodName, String reason) {
+        SemanticError e = new SemanticError(SemanticErrorKind.InvalidOverride);
+        e.strValue = className;
+        e.strValue2 = methodName;
+        e.strValue3 = reason;
+        return e;
+    }
+
+    public static SemanticError abstractMethodNotImplemented(String className, String methodName) {
+        SemanticError e = new SemanticError(SemanticErrorKind.AbstractMethodNotImplemented);
+        e.strValue = className;
+        e.strValue2 = methodName;
+        return e;
+    }
+
+    public static SemanticError fieldShadowing(String className, String fieldName) {
+        SemanticError e = new SemanticError(SemanticErrorKind.FieldShadowing);
+        e.strValue = className;
+        e.strValue2 = fieldName;
+        return e;
+    }
+
+    public static SemanticError invalidAccess(String member, String className) {
+        SemanticError e = new SemanticError(SemanticErrorKind.InvalidAccess);
+        e.strValue = member;
+        e.strValue2 = className;
+        return e;
+    }
+
+    public static SemanticError interfaceMethodNotImplemented(String className, String interfaceName, String methodName) {
+        SemanticError e = new SemanticError(SemanticErrorKind.InterfaceMethodNotImplemented);
+        e.strValue = className;
+        e.strValue2 = interfaceName;
+        e.strValue3 = methodName;
+        return e;
+    }
+
+    public static SemanticError interfaceMethodSignatureMismatch(String className, String interfaceName, String methodName, String reason) {
+        SemanticError e = new SemanticError(SemanticErrorKind.InterfaceMethodSignatureMismatch);
+        e.strValue = className;
+        e.strValue2 = interfaceName;
+        e.strValue3 = methodName;
+        e.strValue4 = reason;
+        return e;
+    }
+
+    public static SemanticError bareMethodCall(String methodName, String className) {
+        SemanticError e = new SemanticError(SemanticErrorKind.BareMethodCall);
+        e.strValue = methodName;
+        e.strValue2 = className;
+        return e;
+    }
+
+    public static SemanticError undefinedEnum(String name) {
+        SemanticError e = new SemanticError(SemanticErrorKind.UndefinedEnum);
+        e.strValue = name;
+        return e;
+    }
+
+    public static SemanticError undefinedVariant(String enumName, String variantName) {
+        SemanticError e = new SemanticError(SemanticErrorKind.UndefinedVariant);
+        e.strValue = enumName;
+        e.strValue2 = variantName;
+        return e;
+    }
+
+    public static SemanticError nonExhaustiveMatch(String enumName, String missingVariants) {
+        SemanticError e = new SemanticError(SemanticErrorKind.NonExhaustiveMatch);
+        e.strValue = enumName;
+        e.strValue2 = missingVariants;
+        return e;
+    }
+
+    // ---- 格式化输出 ----
+
+    public String toString() {
+        if (this.kind == SemanticErrorKind.UndefinedType) {
+            return "Undefined type '" + this.strValue + "'";
+        }
+        if (this.kind == SemanticErrorKind.UndefinedVariable) {
+            return "Undefined variable '" + this.strValue + "'";
+        }
+        if (this.kind == SemanticErrorKind.UndefinedMethod) {
+            return "Undefined method '" + this.strValue2 + "' in class '" + this.strValue + "'";
+        }
+        if (this.kind == SemanticErrorKind.UndefinedClass) {
+            return "Undefined class '" + this.strValue + "'";
+        }
+        if (this.kind == SemanticErrorKind.DuplicateDefinition) {
+            return "Duplicate definition '" + this.strValue + "'";
+        }
+        if (this.kind == SemanticErrorKind.TypeMismatch) {
+            return "Type mismatch: expected '" + this.expectedType + "', found '" + this.foundType + "'";
+        }
+        if (this.kind == SemanticErrorKind.NotAClass) {
+            return "'" + this.strValue + "' is not a class type";
+        }
+        if (this.kind == SemanticErrorKind.CircularInheritance) {
+            return "Circular inheritance detected involving '" + this.strValue + "'";
+        }
+        if (this.kind == SemanticErrorKind.MissingOverride) {
+            return "Method '" + this.strValue2 + "' in '" + this.strValue + "' overrides but is not marked @override";
+        }
+        if (this.kind == SemanticErrorKind.InvalidOverride) {
+            return "Invalid override of '" + this.strValue2 + "' in '" + this.strValue + "': " + this.strValue3;
+        }
+        if (this.kind == SemanticErrorKind.AbstractMethodNotImplemented) {
+            return "Abstract method '" + this.strValue2 + "' not implemented in '" + this.strValue + "'";
+        }
+        if (this.kind == SemanticErrorKind.FieldShadowing) {
+            return "Field '" + this.strValue2 + "' in '" + this.strValue + "' shadows parent field";
+        }
+        if (this.kind == SemanticErrorKind.InvalidAccess) {
+            return "Cannot access '" + this.strValue + "' from class '" + this.strValue2 + "'";
+        }
+        if (this.kind == SemanticErrorKind.InterfaceMethodNotImplemented) {
+            return "Class '" + this.strValue + "' does not implement method '" + this.strValue3 + "' from interface '" + this.strValue2 + "'";
+        }
+        if (this.kind == SemanticErrorKind.InterfaceMethodSignatureMismatch) {
+            return "Method '" + this.strValue3 + "' in class '" + this.strValue + "' does not match interface '" + this.strValue2 + "' signature: " + this.strValue4;
+        }
+        if (this.kind == SemanticErrorKind.BareMethodCall) {
+            return "Method '" + this.strValue + "' must be called as 'this." + this.strValue + "()' or '" + this.strValue2 + "." + this.strValue + "()'";
+        }
+        if (this.kind == SemanticErrorKind.UndefinedEnum) {
+            return "Undefined enum '" + this.strValue + "'";
+        }
+        if (this.kind == SemanticErrorKind.UndefinedVariant) {
+            return "Undefined variant '" + this.strValue2 + "' in enum '" + this.strValue + "'";
+        }
+        if (this.kind == SemanticErrorKind.NonExhaustiveMatch) {
+            return "Non-exhaustive match on enum '" + this.strValue + "', missing variants: " + this.strValue2;
+        }
+        return "Unknown semantic error";
+    }
+}

@@ -1,0 +1,35 @@
+class TestSimple {
+    public static void main(String[] args) {
+        System.printf("Before Dog...\n");
+        Dog d = new Dog("Buddy", 3);
+        System.printf("After Dog...\n");
+        System.printf("Before speak...\n");
+        d.speak();
+        System.printf("After speak...\n");
+    }
+}
+
+class Animal {
+    public String name;
+    public int age;
+
+    public Animal(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    public void speak() {
+        System.printf("%s says: ...\n", this.name);
+    }
+}
+
+class Dog extends Animal {
+    public Dog(String name, int age) {
+        super(name, age);
+    }
+
+    @override
+    public void speak() {
+        System.printf("%s says: Woof!\n", this.name);
+    }
+}

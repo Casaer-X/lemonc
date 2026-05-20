@@ -1,0 +1,10 @@
+class Simple {
+    public static void main(String[] args) {
+        System.printf("Step 1\n");
+        int x = 42;
+        System.printf("Step 2: x = %d\n", x);
+        String s = "hello";
+        System.printf("Step 3: s = %s\n", s);
+        System.printf("Step 4: done\n");
+    }
+}

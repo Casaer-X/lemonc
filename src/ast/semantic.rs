@@ -389,8 +389,13 @@ impl SemanticAnalyzer {
 
     fn check_abstract_implementation(&mut self, class_name: &str) {
         let mut abstract_methods: Vec<(String, Vec<Param>)> = Vec::new();
+        let mut visited = std::collections::HashSet::new();
         let mut current = self.classes.get(class_name).and_then(|c| c.parent.clone());
         while let Some(parent_name) = current {
+            if visited.contains(&parent_name) {
+                break; // Circular inheritance - already reported
+            }
+            visited.insert(parent_name.clone());
             if let Some(parent_info) = self.classes.get(&parent_name) {
                 for method in &parent_info.methods {
                     if method.modifiers.iter().any(|m| matches!(m, MethodModifier::Abstract)) {

@@ -1,0 +1,91 @@
+interface Printable {
+    void print();
+}
+
+class Animal {
+    public String name;
+    public int age;
+
+    public Animal(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    @virtual
+    public void speak() {
+        System.printf("%s says: ...\n", this.name);
+    }
+}
+
+class Dog extends Animal implements Printable {
+    public Dog(String name, int age) {
+        super(name, age);
+    }
+
+    @override
+    public void speak() {
+        System.printf("%s says: Woof!\n", this.name);
+    }
+
+    public void print() {
+        System.printf("Dog(%s, %d)\n", this.name, this.age);
+    }
+}
+
+class Cat extends Animal implements Printable {
+    public Cat(String name, int age) {
+        super(name, age);
+    }
+
+    @override
+    public void speak() {
+        System.printf("%s says: Meow!\n", this.name);
+    }
+
+    public void print() {
+        System.printf("Cat(%s, %d)\n", this.name, this.age);
+    }
+}
+
+class TestClass {
+    public static void main(String[] args) {
+        Dog d = new Dog("Buddy", 3);
+        Cat c = new Cat("Whiskers", 5);
+
+        d.speak();
+        c.speak();
+        d.print();
+        c.print();
+
+        // Array test
+        Array<String> names = new Array<String>();
+        names.add("Alice");
+        names.add("Bob");
+        System.printf("Array size: %d\n", names.size());
+
+        // Map test
+        Map<String, int> scores = new Map<String, int>();
+        scores.put("Alice", 100);
+        scores.put("Bob", 85);
+        System.printf("Alice score: %d\n", scores.get("Alice"));
+
+        // StringBuilder test
+        StringBuilder sb = new StringBuilder();
+        sb.append("Hello");
+        sb.append(" ");
+        sb.append("World");
+        System.printf("StringBuilder: %s\n", sb.toString());
+
+        // Math test
+        int sum = 0;
+        for (int i = 1; i <= 10; i++) {
+            sum = sum + i;
+        }
+        System.printf("Sum 1-10: %d\n", sum);
+
+        // String test
+        String greeting = "Hello, " + "Lemon!";
+        System.printf("Greeting: %s\n", greeting);
+        System.printf("Length: %d\n", greeting.length());
+    }
+}

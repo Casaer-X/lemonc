@@ -1,0 +1,12 @@
+class TestMap {
+    public static void main(String[] args) {
+        System.printf("Creating map...\n");
+        Map<String, String> m = new Map<String, String>();
+        System.printf("Putting values...\n");
+        m.put("key1", "value1");
+        System.printf("Getting value...\n");
+        String v = m.get("key1");
+        System.printf("Value: %s\n", v);
+        System.printf("Done!\n");
+    }
+}

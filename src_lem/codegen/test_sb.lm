@@ -1,0 +1,11 @@
+class TestSB {
+    public static void main(String[] args) {
+        System.printf("Creating SB...\n");
+        StringBuilder sb = new StringBuilder();
+        sb.append("Hello");
+        sb.append(" ");
+        sb.append("World");
+        System.printf("Result: %s\n", sb.toString());
+        System.printf("Done!\n");
+    }
+}

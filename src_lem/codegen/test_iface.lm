@@ -1,0 +1,44 @@
+class TestInterface {
+    public static void main(String[] args) {
+        System.printf("Creating Dog...\n");
+        Dog d = new Dog("Buddy", 3);
+        System.printf("Calling speak...\n");
+        d.speak();
+        System.printf("Calling print...\n");
+        d.print();
+        System.printf("Done!\n");
+    }
+}
+
+interface Printable {
+    void print();
+}
+
+class Animal {
+    public String name;
+    public int age;
+
+    public Animal(String name, int age) {
+        this.name = name;
+        this.age = age;
+    }
+
+    public void speak() {
+        System.printf("%s says: ...\n", this.name);
+    }
+}
+
+class Dog extends Animal implements Printable {
+    public Dog(String name, int age) {
+        super(name, age);
+    }
+
+    @override
+    public void speak() {
+        System.printf("%s says: Woof!\n", this.name);
+    }
+
+    public void print() {
+        System.printf("Dog(%s, %d)\n", this.name, this.age);
+    }
+}

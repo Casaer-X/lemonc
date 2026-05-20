@@ -1,0 +1,12 @@
+class TestMapInt {
+    public static void main(String[] args) {
+        // Test Map<String, int>
+        Map<String, int> scores = new Map<String, int>();
+        scores.put("Alice", 100);
+        scores.put("Bob", 85);
+        int aliceScore = scores.get("Alice");
+        System.printf("Alice score: %d\n", aliceScore);
+        System.printf("Bob score: %d\n", scores.get("Bob"));
+        System.printf("Done!\n");
+    }
+}
