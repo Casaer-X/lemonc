@@ -35,6 +35,7 @@ pub enum TokenKind {
     LeftBrace, RightBrace,
     LeftBracket, RightBracket,
     Comma, Dot, Semicolon, Colon, Question,
+    NullCoalesce,
 
     EndOfFile,
     Error(String),
@@ -167,6 +168,7 @@ impl fmt::Display for TokenKind {
             TokenKind::Semicolon => write!(f, ";"),
             TokenKind::Colon => write!(f, ":"),
             TokenKind::Question => write!(f, "?"),
+            TokenKind::NullCoalesce => write!(f, "??"),
             TokenKind::EndOfFile => write!(f, "EOF"),
             TokenKind::Error(s) => write!(f, "Error({})", s),
         }

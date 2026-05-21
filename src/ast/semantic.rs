@@ -751,6 +751,19 @@ impl SemanticAnalyzer {
                 }
                 if let Expr::FieldAccess(obj, method_name) = callee.as_ref() {
                     if let Expr::Variable(var_name) = obj.as_ref() {
+                        // Enum variant constructor call: EnumName.VariantName(args)
+                        if self.is_enum_type(var_name) {
+                            if !self.enum_has_variant(var_name, method_name) {
+                                self.errors.push(SemanticError::UndefinedVariant {
+                                    enum_name: var_name.clone(),
+                                    variant_name: method_name.clone(),
+                                });
+                            }
+                            for arg in args {
+                                self.check_expr(arg);
+                            }
+                            return;
+                        }
                         if self.classes.contains_key(var_name) || self.is_builtin_type(var_name) {
                             if !self.class_has_method(var_name, method_name) && !self.is_builtin_type_method(var_name, method_name) {
                                 self.errors.push(SemanticError::UndefinedMethod {
@@ -811,6 +824,16 @@ impl SemanticAnalyzer {
             Expr::FieldAccess(obj, field_name) => {
                 self.check_expr(obj);
                 if let Expr::Variable(var_name) = obj.as_ref() {
+                    // Enum variant/constant access: EnumName.VariantName
+                    if self.is_enum_type(var_name) {
+                        if !self.enum_has_variant(var_name, field_name) {
+                            self.errors.push(SemanticError::UndefinedVariant {
+                                enum_name: var_name.clone(),
+                                variant_name: field_name.clone(),
+                            });
+                        }
+                        return;
+                    }
                     if let Some(class_name) = self.resolve_var_class(var_name) {
                         if !self.class_has_field(&class_name, field_name) &&
                            !self.class_has_method(&class_name, field_name) {
@@ -984,6 +1007,20 @@ impl SemanticAnalyzer {
             | "List" | "Pair" | "Optional" | "Result" | "Set" | "Queue" | "Stack" | "HashMap" | "HashSet" | "LinkedList" | "Tuple"
             | "System" | "StringBuilder" | "Character" | "File"
         ) || self.enums.contains_key(name)
+    }
+
+    /// Check if a name is an enum type
+    fn is_enum_type(&self, name: &str) -> bool {
+        self.enums.contains_key(name)
+    }
+
+    /// Check if an enum has a specific variant
+    fn enum_has_variant(&self, enum_name: &str, variant_name: &str) -> bool {
+        if let Some(enum_info) = self.enums.get(enum_name) {
+            enum_info.variants.iter().any(|v| v.name == variant_name)
+        } else {
+            false
+        }
     }
 
     fn is_builtin_func(&self, name: &str) -> bool {

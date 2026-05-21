@@ -1261,6 +1261,7 @@ class Parser {
 
     public static int getPrecedence(int kind) {
         if (kind == TokenKind.Question) return 1;
+        if (kind == TokenKind.NullCoalesce) return 1;
         if (kind == TokenKind.Or) return 2;
         if (kind == TokenKind.And) return 3;
         if (kind == TokenKind.Pipe) return 4;
@@ -1302,6 +1303,14 @@ class Parser {
             int precedence = Parser.getPrecedence(this.peekKind());
             if (precedence == 0 || precedence < minPrec) {
                 break;
+            }
+
+            // Null coalesce operator: a ?? b
+            if (opKind == TokenKind.NullCoalesce) {
+                this.advance();
+                Expr right = this.parseExpressionWithMinPrecedence(2);
+                expr = Expr.makeBinaryOp(BinaryOp.NullCoalesce, expr, right);
+                continue;
             }
 
             // 三元表达式
@@ -1501,12 +1510,64 @@ class Parser {
 
         if (kind == TokenKind.LeftParen) {
             this.advance();
-            if (this.isTypeStart()) {
-                TypeRef typeRef = this.parseTypeRef();
+            // Use lookahead to distinguish cast vs parenthesized expression
+            // Try parsing as a type; if followed by ), it's a cast
+            int savedPos = this.pos;
+            bool isCast = false;
+            TypeRef typeRef = null;
+
+            int nextKind = this.peekKind();
+            if (nextKind == TokenKind.Void
+                || nextKind == TokenKind.Bool
+                || nextKind == TokenKind.Byte
+                || nextKind == TokenKind.Char
+                || nextKind == TokenKind.Short
+                || nextKind == TokenKind.Int
+                || nextKind == TokenKind.Long
+                || nextKind == TokenKind.Float
+                || nextKind == TokenKind.Double) {
+                // Primitive type cast - unambiguous
+                typeRef = this.parseTypeRef();
+                if (this.peekKind() == TokenKind.RightParen) {
+                    isCast = true;
+                }
+            } else if (nextKind == TokenKind.Identifier) {
+                // Could be a class cast like (String)x or a paren expr like (c >= 65)
+                // Try parsing as type; if it's just "Identifier)" and the next after ) is
+                // a primary/unary expression start, it's a cast
+                typeRef = this.parseTypeRef();
+                if (this.peekKind() == TokenKind.RightParen) {
+                    // Look ahead past ) to check if it's followed by an expression
+                    int afterParenPos = this.pos + 1;
+                    if (afterParenPos < this.tokens.size()) {
+                        int afterParenKind = this.tokens.get(afterParenPos).kind;
+                        // If followed by identifier, (, new, this, super, literal, etc. -> cast
+                        if (afterParenKind == TokenKind.Identifier
+                            || afterParenKind == TokenKind.LeftParen
+                            || afterParenKind == TokenKind.New
+                            || afterParenKind == TokenKind.This
+                            || afterParenKind == TokenKind.Super
+                            || afterParenKind == TokenKind.IntegerLiteral
+                            || afterParenKind == TokenKind.StringLiteral
+                            || afterParenKind == TokenKind.Null
+                            || afterParenKind == TokenKind.Minus
+                            || afterParenKind == TokenKind.Not
+                            || afterParenKind == TokenKind.Inc
+                            || afterParenKind == TokenKind.Dec
+                            || afterParenKind == TokenKind.Sizeof) {
+                            isCast = true;
+                        }
+                    }
+                }
+            }
+
+            if (isCast) {
                 this.expect(TokenKind.RightParen);
                 Expr operand = this.parseUnaryExpression();
                 return Expr.makeCast(typeRef, operand);
             } else {
+                // Not a cast - restore position and parse as parenthesized expression
+                this.pos = savedPos;
                 Expr expr = this.parseExpression();
                 this.expect(TokenKind.RightParen);
                 return expr;

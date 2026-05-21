@@ -12,12 +12,12 @@ import lemon.parser.AST;
 class VirtualMethodEntry {
     public String name;
     public String returnType;
-    public Array<Param> params;
+    public Array<String> paramTypes;  // C type strings
 
-    public VirtualMethodEntry(String name, String returnType, Array<Param> params) {
+    public VirtualMethodEntry(String name, String returnType, Array<String> paramTypes) {
         this.name = name;
         this.returnType = returnType;
-        this.params = params;
+        this.paramTypes = paramTypes;
     }
 }
 
@@ -25,12 +25,12 @@ class VirtualMethodEntry {
 class InterfaceMethodEntry {
     public String name;
     public String returnType;
-    public Array<Param> params;
+    public Array<String> paramTypes;  // C type strings
 
-    public InterfaceMethodEntry(String name, String returnType, Array<Param> params) {
+    public InterfaceMethodEntry(String name, String returnType, Array<String> paramTypes) {
         this.name = name;
         this.returnType = returnType;
-        this.params = params;
+        this.paramTypes = paramTypes;
     }
 }
 
@@ -45,6 +45,7 @@ class CCodeGen {
     private Map<String, String> varTypes;
     private Map<String, Array<String> > classFields;       // className → [(cType, fieldName)]
     private Map<String, Array<String> > classFieldTypes;    // className → [cType]
+    private Map<String, Map<String, String> > classFieldTypeMap;  // className → (fieldName → cType)
     private Map<String, Array<VirtualMethodEntry> > virtualMethods;
     private Map<String, Array<InterfaceMethodEntry> > interfaceMethods;
     private Map<String, Array<String> > classImplements;
@@ -66,6 +67,7 @@ class CCodeGen {
         this.varTypes = new Map<String, String>();
         this.classFields = new Map<String, Array<String> >();
         this.classFieldTypes = new Map<String, Array<String> >();
+        this.classFieldTypeMap = new Map<String, Map<String, String> >();
         this.virtualMethods = new Map<String, Array<VirtualMethodEntry> >();
         this.interfaceMethods = new Map<String, Array<InterfaceMethodEntry> >();
         this.classImplements = new Map<String, Array<String> >();
@@ -86,30 +88,69 @@ class CCodeGen {
 
     public String generate(Program program) {
         // Phase 1: 收集信息
+        System.printf("[DBG] collectClassFields...\n");
         this.collectClassFields(program);
+        System.printf("[DBG] collectVirtualMethods...\n");
         this.collectVirtualMethods(program);
+        System.printf("[DBG] collectInterfaceInfo...\n");
         this.collectInterfaceInfo(program);
+        System.printf("[DBG] collectMethodSignatures...\n");
         this.collectMethodSignatures(program);
+        System.printf("[DBG] collectEnums...\n");
         this.collectEnums(program);
 
+        // Phase 1.5: 预扫描 - 运行实现生成以收集字符串字面量
+        // 保存当前输出状态
+        StringBuilder savedOutput = this.output;
+
+        // 重置字符串字面量收集和输出
+        this.stringLiterals = new Array<String>();
+        this.stringCounter = 0;
+        this.output = new StringBuilder();
+
+        // 运行所有生成阶段（仅用于收集字符串字面量）
+        this.emitRuntimeLibrary();
+        this.emitForwardDeclarations(program);
+        this.emitVtableInstances(program);
+        this.emitImplementations(program);
+        this.emitMain(program);
+
+        // 保存收集到的字符串字面量
+        Array<String> collectedLiterals = this.stringLiterals;
+
+        // 恢复原始输出状态，但保留字符串字面量
+        this.output = savedOutput;
+        this.stringLiterals = collectedLiterals;
+        this.stringCounter = 0;  // 重置计数器，正式生成时从0开始编号
+
         // Phase 2: 运行时库
+        System.printf("[DBG] emitRuntimeLibrary...\n");
         this.emitRuntimeLibrary();
 
+        // Phase 2.5: 字符串字面量定义（必须在函数实现之前）
+        System.printf("[DBG] emitStringLiterals...\n");
+        this.emitStringLiterals();
+
+        // Phase 2.6: 静态字段 #define 宏
+        this.emitStaticFieldDefines(program);
+
         // Phase 3: 前向声明
+        System.printf("[DBG] emitForwardDeclarations...\n");
         this.emitForwardDeclarations(program);
 
         // Phase 4: Vtable/ITable 实例
+        System.printf("[DBG] emitVtableInstances...\n");
         this.emitVtableInstances(program);
 
         // Phase 5: 实现生成
+        System.printf("[DBG] emitImplementations...\n");
         this.emitImplementations(program);
 
         // Phase 6: Main 入口
+        System.printf("[DBG] emitMain...\n");
         this.emitMain(program);
 
-        // Phase 7: 字符串字面量定义
-        this.emitStringLiterals();
-
+        System.printf("[DBG] generate done.\n");
         return this.output.toString();
     }
 
@@ -145,7 +186,10 @@ class CCodeGen {
     private String freshStringLiteral(String value) {
         String name = "_str_" + String.intToString(this.stringCounter);
         this.stringCounter = this.stringCounter + 1;
-        this.stringLiterals.add(value);
+        // Only add to stringLiterals if not already collected during prescan
+        if (this.stringCounter > this.stringLiterals.size()) {
+            this.stringLiterals.add(value);
+        }
         return name;
     }
 
@@ -172,6 +216,76 @@ class CCodeGen {
             this.emitLineNoIndent("static const char* _str_" + String.intToString(i) + " = \"" + escaped + "\";");
         }
         this.emitLineNoIndent("");
+    }
+
+    // ---- 静态字段 #define 宏 ----
+
+    private void emitStaticFieldDefines(Program program) {
+        for (int i = 0; i < program.declarations.size(); i++) {
+            Declaration decl = program.declarations.get(i);
+            if (decl.kind == DeclKind.Class) {
+                ClassDecl class_ = decl.classDecl;
+                for (int mi = 0; mi < class_.members.size(); mi++) {
+                    ClassMember member = class_.members.get(mi);
+                    if (member.kind == ClassMemberKind.Field) {
+                        VarDecl field = member.field;
+                        // Check if field has Static modifier (VarModifier.Static = 2)
+                        bool isStatic = false;
+                        if (field.modifiers != null) {
+                            for (int modi = 0; modi < field.modifiers.size(); modi++) {
+                                if (field.modifiers.get(modi) == 2) {
+                                    isStatic = true;
+                                }
+                            }
+                        }
+                        if (isStatic && field.initializer != null) {
+                            String val = this.genExpr(field.initializer);
+                            this.emitLineNoIndent("#define " + class_.name.toUpperCase() + "_" + field.name + " " + val);
+                        }
+                    }
+                }
+            }
+        }
+        this.emitLineNoIndent("");
+    }
+
+    // Convert binary operator int to string (replaces BinaryOp.toString)
+    private String opToString(int op) {
+        if (op == BinaryOp.Add) return "+";
+        if (op == BinaryOp.Sub) return "-";
+        if (op == BinaryOp.Mul) return "*";
+        if (op == BinaryOp.Div) return "/";
+        if (op == BinaryOp.Mod) return "%";
+        if (op == BinaryOp.And) return "&&";
+        if (op == BinaryOp.Or) return "||";
+        if (op == BinaryOp.BitAnd) return "&";
+        if (op == BinaryOp.BitOr) return "|";
+        if (op == BinaryOp.BitXor) return "^";
+        if (op == BinaryOp.Shl) return "<<";
+        if (op == BinaryOp.Shr) return ">>";
+        if (op == BinaryOp.Eq) return "==";
+        if (op == BinaryOp.Ne) return "!=";
+        if (op == BinaryOp.Lt) return "<";
+        if (op == BinaryOp.Gt) return ">";
+        if (op == BinaryOp.Le) return "<=";
+        if (op == BinaryOp.Ge) return ">=";
+        if (op == BinaryOp.NullCoalesce) return "??";
+        return "??";
+    }
+
+    // Convert unary operator int to string (replaces UnaryOp.toString)
+    private String unaryOpToString(int op) {
+        if (op == UnaryOp.Minus) return "-";
+        if (op == UnaryOp.Not) return "!";
+        if (op == UnaryOp.BitNot) return "~";
+        if (op == UnaryOp.PreInc) return "++";
+        if (op == UnaryOp.PreDec) return "--";
+        if (op == UnaryOp.Plus) return "+";
+        if (op == UnaryOp.Deref) return "*";
+        if (op == UnaryOp.AddressOf) return "&";
+        if (op == UnaryOp.PostInc) return "++";
+        if (op == UnaryOp.PostDec) return "--";
+        return "??";
     }
 
     private String escapeCString(String s) {
@@ -264,6 +378,7 @@ class CCodeGen {
                 this.classNames.add(class_.name);
                 Array<String> fields = new Array<String>();
                 Array<String> fieldTypes = new Array<String>();
+                Map<String, String> fieldTypeMap = new Map<String, String>();
                 for (int mi = 0; mi < class_.members.size(); mi++) {
                     ClassMember member = class_.members.get(mi);
                     if (member.kind == ClassMemberKind.Field) {
@@ -272,10 +387,12 @@ class CCodeGen {
                         fields.add(ct);
                         fields.add(field.name);
                         fieldTypes.add(ct);
+                        fieldTypeMap.put(field.name, ct);
                     }
                 }
                 this.classFields.put(class_.name, fields);
                 this.classFieldTypes.put(class_.name, fieldTypes);
+                this.classFieldTypeMap.put(class_.name, fieldTypeMap);
             }
         }
     }
@@ -316,7 +433,11 @@ class CCodeGen {
                             }
                             if (!alreadyExists) {
                                 String retType = this.ct(method.returnType);
-                                entries.add(new VirtualMethodEntry(method.name, retType, method.params));
+                                Array<String> paramTypes = new Array<String>();
+                                for (int pi = 0; pi < method.params.size(); pi++) {
+                                    paramTypes.add(this.ct(method.params.get(pi).paramType));
+                                }
+                                entries.add(new VirtualMethodEntry(method.name, retType, paramTypes));
                             }
                         }
                     }
@@ -339,7 +460,11 @@ class CCodeGen {
                     if (member.kind == InterfaceMemberKind.MethodSignature) {
                         MethodSignature sig = member.methodSignature;
                         String retType = this.ct(sig.returnType);
-                        entries.add(new InterfaceMethodEntry(sig.name, retType, sig.params));
+                        Array<String> paramTypes = new Array<String>();
+                        for (int pi = 0; pi < sig.params.size(); pi++) {
+                            paramTypes.add(this.ct(sig.params.get(pi).paramType));
+                        }
+                        entries.add(new InterfaceMethodEntry(sig.name, retType, paramTypes));
                     }
                 }
                 this.interfaceMethods.put(iface.name, entries);
@@ -583,14 +708,7 @@ class CCodeGen {
         this.emitLineNoIndent("        idx = (idx + 1) % map->capacity;");
         this.emitLineNoIndent("    }");
         this.emitLineNoIndent("}");
-        this.emitLineNoIndent("LemonArray* LemonMap_keys(LemonMap* map) {");
-        this.emitLineNoIndent("    if (!map) return LemonArray_new(sizeof(void*));");
-        this.emitLineNoIndent("    LemonArray* arr = LemonArray_new(sizeof(void*));");
-        this.emitLineNoIndent("    for (int32_t i = 0; i < map->capacity; i++) {");
-        this.emitLineNoIndent("        if (map->entries[i].occupied && map->entries[i].key) LemonArray_add(arr, (void*)map->entries[i].key);");
-        this.emitLineNoIndent("    }");
-        this.emitLineNoIndent("    return arr;");
-        this.emitLineNoIndent("}");
+        // LemonMap_keys is defined in the Rust runtime library, not here
         this.emitLineNoIndent("LemonArray* LemonMap_values(LemonMap* map) {");
         this.emitLineNoIndent("    if (!map) return LemonArray_new(sizeof(void*));");
         this.emitLineNoIndent("    LemonArray* arr = LemonArray_new(sizeof(void*));");
@@ -625,8 +743,8 @@ class CCodeGen {
                 for (int vi = 0; vi < vtable.size(); vi++) {
                     VirtualMethodEntry entry = vtable.get(vi);
                     String sig = entry.returnType + " (*" + entry.name + ")(" + className + "* self";
-                    for (int pi = 0; pi < entry.params.size(); pi++) {
-                        sig = sig + ", " + this.ct(entry.params.get(pi).paramType);
+                    for (int pi = 0; pi < entry.paramTypes.size(); pi++) {
+                        sig = sig + ", " + entry.paramTypes.get(pi);
                     }
                     sig = sig + ");";
                     this.emitLineNoIndent("    " + sig);
@@ -646,8 +764,8 @@ class CCodeGen {
                 for (int mi = 0; mi < methods.size(); mi++) {
                     InterfaceMethodEntry entry = methods.get(mi);
                     String sig = entry.returnType + " (*" + entry.name + ")(void* self";
-                    for (int pi = 0; pi < entry.params.size(); pi++) {
-                        sig = sig + ", " + this.ct(entry.params.get(pi).paramType);
+                    for (int pi = 0; pi < entry.paramTypes.size(); pi++) {
+                        sig = sig + ", " + entry.paramTypes.get(pi);
                     }
                     sig = sig + ");";
                     this.emitLineNoIndent("    " + sig);
@@ -680,9 +798,17 @@ class CCodeGen {
                     if (member.kind == ClassMemberKind.Method) {
                         MethodDecl method = member.method;
                         String retType = this.ct(method.returnType);
-                        String sig = retType + " " + class_.name + "_" + method.name + "(" + class_.name + "* self";
+                        // Pre-extract param info
+                        Array<String> fwdParamCtypes = new Array<String>();
+                        Array<String> fwdParamNames = new Array<String>();
                         for (int pi = 0; pi < method.params.size(); pi++) {
-                            sig = sig + ", " + this.ct(method.params.get(pi).paramType) + " " + method.params.get(pi).name;
+                            Param p = method.params.get(pi);
+                            fwdParamCtypes.add(this.ct(p.paramType));
+                            fwdParamNames.add(p.name);
+                        }
+                        String sig = retType + " " + class_.name + "_" + method.name + "(" + class_.name + "* self";
+                        for (int pi = 0; pi < fwdParamCtypes.size(); pi++) {
+                            sig = sig + ", " + fwdParamCtypes.get(pi) + " " + fwdParamNames.get(pi);
                         }
                         sig = sig + ");";
                         this.emitLineNoIndent(sig);
@@ -691,10 +817,18 @@ class CCodeGen {
             } else if (decl.kind == DeclKind.Function) {
                 FunctionDecl func = decl.functionDecl;
                 String retType = this.ct(func.returnType);
-                String sig = retType + " " + func.name + "(";
+                // Pre-extract param info
+                Array<String> fwdParamCtypes = new Array<String>();
+                Array<String> fwdParamNames = new Array<String>();
                 for (int pi = 0; pi < func.params.size(); pi++) {
+                    Param p = func.params.get(pi);
+                    fwdParamCtypes.add(this.ct(p.paramType));
+                    fwdParamNames.add(p.name);
+                }
+                String sig = retType + " " + func.name + "(";
+                for (int pi = 0; pi < fwdParamCtypes.size(); pi++) {
                     if (pi > 0) sig = sig + ", ";
-                    sig = sig + this.ct(func.params.get(pi).paramType) + " " + func.params.get(pi).name;
+                    sig = sig + fwdParamCtypes.get(pi) + " " + fwdParamNames.get(pi);
                 }
                 sig = sig + ");";
                 this.emitLineNoIndent(sig);
@@ -890,8 +1024,10 @@ class CCodeGen {
         for (int i = 0; i < program.declarations.size(); i++) {
             Declaration decl = program.declarations.get(i);
             if (decl.kind == DeclKind.Class) {
+                System.printf("[DBG] emitClass: %s\n", decl.classDecl.name);
                 this.emitClass(decl.classDecl);
             } else if (decl.kind == DeclKind.Function) {
+                System.printf("[DBG] emitFunction: %s\n", decl.functionDecl.name);
                 this.emitFunction(decl.functionDecl);
             }
         }
@@ -910,6 +1046,7 @@ class CCodeGen {
         // Populate varTypes with field types
         this.varTypes = new Map<String, String>();
         Array<String> fields = this.classFields.get(class_.name);
+        System.printf("[DBG] emitClass: varTypes setup, fields=%s\n", fields == null ? "null" : "ok");
         if (fields != null) {
             for (int fi = 0; fi < fields.size(); fi = fi + 2) {
                 String ftype = fields.get(fi);
@@ -919,14 +1056,19 @@ class CCodeGen {
         }
 
         // Default constructor
+        System.printf("[DBG] emitClass: emitDefaultCtor...\n");
         this.emitDefaultCtor(class_);
+        System.printf("[DBG] emitClass: emitDefaultCtor done\n");
 
         // Members
+        System.printf("[DBG] emitClass: members count=%d\n", class_.members.size());
         for (int mi = 0; mi < class_.members.size(); mi++) {
             ClassMember member = class_.members.get(mi);
+            System.printf("[DBG] emitClass: member[%d] kind=%d\n", mi, member.kind);
             if (member.kind == ClassMemberKind.Constructor) {
                 this.emitConstructor(class_, member.constructor);
             } else if (member.kind == ClassMemberKind.Method) {
+                System.printf("[DBG] emitClass: emitMethod %s\n", member.method.name);
                 this.emitMethod(class_, member.method);
             } else if (member.kind == ClassMemberKind.Destructor) {
                 this.emitDestructor(class_, member.destructor);
@@ -957,16 +1099,25 @@ class CCodeGen {
     // ---- 构造函数 ----
 
     private void emitConstructor(ClassDecl class_, ConstructorDecl ctor) {
-        String sig = class_.name + "* " + class_.name + "_ctor_" + class_.name + "(" + class_.name + "* self";
+        // Pre-extract param info to avoid void* dereference in generated C code
+        Array<String> paramCtypes = new Array<String>();
+        Array<String> paramNames = new Array<String>();
         for (int pi = 0; pi < ctor.params.size(); pi++) {
-            sig = sig + ", " + this.ct(ctor.params.get(pi).paramType) + " " + ctor.params.get(pi).name;
+            Param p = ctor.params.get(pi);
+            paramCtypes.add(this.ct(p.paramType));
+            paramNames.add(p.name);
+        }
+
+        String sig = class_.name + "* " + class_.name + "_ctor_" + class_.name + "(" + class_.name + "* self";
+        for (int pi = 0; pi < paramCtypes.size(); pi++) {
+            sig = sig + ", " + paramCtypes.get(pi) + " " + paramNames.get(pi);
         }
         sig = sig + ") {";
         this.emitLineNoIndent(sig);
         this.increaseIndent();
         // Populate varTypes with params
-        for (int pi = 0; pi < ctor.params.size(); pi++) {
-            this.varTypes.put(ctor.params.get(pi).name, this.ct(ctor.params.get(pi).paramType));
+        for (int pi = 0; pi < paramCtypes.size(); pi++) {
+            this.varTypes.put(paramNames.get(pi), paramCtypes.get(pi));
         }
         // Call parent constructor
         if (this.parentClass != null) {
@@ -985,25 +1136,41 @@ class CCodeGen {
     // ---- 方法生成 ----
 
     private void emitMethod(ClassDecl class_, MethodDecl method) {
+        System.printf("[DBG] emitMethod: start %s.%s\n", class_.name, method.name);
         String retType = this.ct(method.returnType);
-        String sig = retType + " " + class_.name + "_" + method.name + "(" + class_.name + "* self";
+        System.printf("[DBG] emitMethod: retType=%s\n", retType);
+        // Pre-extract param info to avoid void* dereference in generated C code
+        Array<String> paramCtypes = new Array<String>();
+        Array<String> paramNames = new Array<String>();
+        System.printf("[DBG] emitMethod: params count=%d\n", method.params == null ? -1 : method.params.size());
         for (int pi = 0; pi < method.params.size(); pi++) {
-            sig = sig + ", " + this.ct(method.params.get(pi).paramType) + " " + method.params.get(pi).name;
+            Param p = method.params.get(pi);
+            paramCtypes.add(this.ct(p.paramType));
+            paramNames.add(p.name);
+        }
+        System.printf("[DBG] emitMethod: building sig...\n");
+        String sig = retType + " " + class_.name + "_" + method.name + "(" + class_.name + "* self";
+        for (int pi = 0; pi < paramCtypes.size(); pi++) {
+            sig = sig + ", " + paramCtypes.get(pi) + " " + paramNames.get(pi);
         }
         sig = sig + ") {";
+        System.printf("[DBG] emitMethod: emitting sig...\n");
         this.emitLineNoIndent(sig);
         this.increaseIndent();
         // Populate varTypes with params
-        for (int pi = 0; pi < method.params.size(); pi++) {
-            this.varTypes.put(method.params.get(pi).name, this.ct(method.params.get(pi).paramType));
+        for (int pi = 0; pi < paramCtypes.size(); pi++) {
+            this.varTypes.put(paramNames.get(pi), paramCtypes.get(pi));
         }
         // Body
+        System.printf("[DBG] emitMethod: body null=%s\n", method.body == null ? "yes" : "no");
         if (method.body != null) {
+            System.printf("[DBG] emitMethod: emitBlock...\n");
             this.emitBlock(method.body);
         }
         this.decreaseIndent();
         this.emitLineNoIndent("}");
         this.emitLineNoIndent("");
+        System.printf("[DBG] emitMethod: done\n");
     }
 
     // ---- 析构函数 ----
@@ -1021,17 +1188,25 @@ class CCodeGen {
 
     private void emitFunction(FunctionDecl func) {
         String retType = this.ct(func.returnType);
-        String sig = retType + " " + func.name + "(";
+        // Pre-extract param info to avoid void* dereference in generated C code
+        Array<String> paramCtypes = new Array<String>();
+        Array<String> paramNames = new Array<String>();
         for (int pi = 0; pi < func.params.size(); pi++) {
+            Param p = func.params.get(pi);
+            paramCtypes.add(this.ct(p.paramType));
+            paramNames.add(p.name);
+        }
+        String sig = retType + " " + func.name + "(";
+        for (int pi = 0; pi < paramCtypes.size(); pi++) {
             if (pi > 0) sig = sig + ", ";
-            sig = sig + this.ct(func.params.get(pi).paramType) + " " + func.params.get(pi).name;
+            sig = sig + paramCtypes.get(pi) + " " + paramNames.get(pi);
         }
         sig = sig + ") {";
         this.emitLineNoIndent(sig);
         this.increaseIndent();
         this.varTypes = new Map<String, String>();
-        for (int pi = 0; pi < func.params.size(); pi++) {
-            this.varTypes.put(func.params.get(pi).name, this.ct(func.params.get(pi).paramType));
+        for (int pi = 0; pi < paramCtypes.size(); pi++) {
+            this.varTypes.put(paramNames.get(pi), paramCtypes.get(pi));
         }
         this.emitBlock(func.body);
         this.decreaseIndent();
@@ -1237,11 +1412,40 @@ class CCodeGen {
     private String genExpr(Expr expr) {
         if (expr == null) return "NULL";
 
-        if (expr.kind == ExprKind.IntegerLiteral) return expr.strValue;
-        if (expr.kind == ExprKind.FloatLiteral) return expr.strValue + "f";
+        if (expr.kind == ExprKind.IntegerLiteral) {
+            // Convert long value to string representation directly
+            long v = expr.longValue;
+            if (v == 0) return "0";
+            bool neg = v < 0;
+            if (neg) v = -v;
+            String digits = "0123456789";
+            String s = "";
+            while (v > 0) {
+                int digit = (int)(v % 10);
+                s = digits.substring(digit, digit + 1) + s;
+                v = v / 10;
+            }
+            if (neg) s = "-" + s;
+            return s;
+        }
+        if (expr.kind == ExprKind.FloatLiteral) {
+            long v = (long)expr.doubleValue;
+            if (v == 0) return "0.0";
+            bool neg = v < 0;
+            if (neg) v = -v;
+            String digits = "0123456789";
+            String s = "";
+            while (v > 0) {
+                int digit = (int)(v % 10);
+                s = digits.substring(digit, digit + 1) + s;
+                v = v / 10;
+            }
+            if (neg) s = "-" + s;
+            return s + ".0";
+        }
         if (expr.kind == ExprKind.StringLiteral) return this.freshStringLiteral(expr.strValue);
         if (expr.kind == ExprKind.CharLiteral) return "'" + expr.strValue + "'";
-        if (expr.kind == ExprKind.BoolLiteral) return expr.strValue.equals("true") ? "1" : "0";
+        if (expr.kind == ExprKind.BoolLiteral) return expr.boolValue ? "1" : "0";
         if (expr.kind == ExprKind.Null) return "NULL";
         if (expr.kind == ExprKind.This) return "self";
         if (expr.kind == ExprKind.Super) return "self";
@@ -1251,21 +1455,29 @@ class CCodeGen {
         }
 
         if (expr.kind == ExprKind.BinaryOp) {
+            String opStr = this.opToString(expr.opValue);
+            // Null coalesce operator: a ?? b => (a != NULL ? a : b)
+            if (opStr.equals("??")) {
+                String left = this.genExpr(expr.left);
+                String right = this.genExpr(expr.right);
+                return "((" + left + ") != NULL ? (" + left + ") : (" + right + "))";
+            }
             // String concatenation
-            if (expr.strValue.equals("+") && this.exprIsStringType(expr.left)) {
+            if (opStr.equals("+") && this.exprIsStringType(expr.left)) {
                 return this.genStringConcat(expr.left, expr.right);
             }
             String left = this.genExpr(expr.left);
             String right = this.genExpr(expr.right);
-            return "(" + left + " " + expr.strValue + " " + right + ")";
+            return String.concat("(", String.concat(left, String.concat(" ", String.concat(opStr, String.concat(" ", String.concat(right, ")"))))));
         }
 
         if (expr.kind == ExprKind.UnaryOp) {
+            String opStr = this.unaryOpToString(expr.opValue);
             String operand = this.genExpr(expr.operand);
-            if (expr.strValue.equals("++") || expr.strValue.equals("--")) {
-                return "(" + operand + expr.strValue + ")";
+            if (opStr.equals("++") || opStr.equals("--")) {
+                return String.concat("(", String.concat(operand, String.concat(opStr, ")")));
             }
-            return "(" + expr.strValue + operand + ")";
+            return String.concat("(", String.concat(opStr, String.concat(operand, ")")));
         }
 
         if (expr.kind == ExprKind.Assignment) {
@@ -1291,11 +1503,18 @@ class CCodeGen {
         }
 
         if (expr.kind == ExprKind.MethodCall) {
-            return this.genMethodCallExpr(expr);
+            return this.genObjMethodCall(expr.receiver, expr.strValue, expr.args);
         }
 
         if (expr.kind == ExprKind.ArrayAccess) {
-            return this.genExpr(expr.receiver) + "[" + this.genExpr(expr.index) + "]";
+            String arrExpr = this.genExpr(expr.receiver);
+            String idxExpr = this.genExpr(expr.index);
+            // Determine element type for cast
+            String elemType = this.inferArrayAccessElementType(expr);
+            if (elemType != null) {
+                return "((" + elemType + ")LemonArray_get((LemonArray*)" + arrExpr + ", " + idxExpr + "))";
+            }
+            return "LemonArray_get((LemonArray*)" + arrExpr + ", " + idxExpr + ")";
         }
 
         if (expr.kind == ExprKind.Cast) {
@@ -1338,7 +1557,12 @@ class CCodeGen {
         for (int ai = 0; ai < expr.args.size(); ai++) {
             args = args + ", " + this.genExpr(expr.args.get(ai));
         }
-        return className + "_ctor((" + className + "*)malloc(sizeof(" + className + ")), " + args.substring(6) + ")";
+        // If there are constructor arguments, use the named constructor (ClassName_ClassName)
+        // Otherwise use the default constructor (ClassName_ctor)
+        if (expr.args.size() > 0) {
+            return className + "_" + className + "((" + className + "*)malloc(sizeof(" + className + ")), " + args.substring(6) + ")";
+        }
+        return className + "_ctor((" + className + "*)malloc(sizeof(" + className + ")))";
     }
 
     // ---- FieldAccess ----
@@ -1350,6 +1574,43 @@ class CCodeGen {
             String varName = expr.receiver.strValue;
             if (this.enums.containsKey(varName)) {
                 return varName + "_KIND_" + field;
+            }
+            // Static field access on a class (e.g., DeclKind.Class → DECLKIND_Class)
+            if (this.classFields.containsKey(varName)) {
+                return varName.toUpperCase() + "_" + field;
+            }
+            // Check if variable is a known container type and field should be a method call
+            String varType = this.varTypes.get(varName);
+            if (varType != null) {
+                if (varType.equals("LemonArray*")) {
+                    if (field.equals("length") || field.equals("size")) {
+                        return "LemonArray_size(" + varName + ")";
+                    }
+                }
+                if (varType.equals("LemonMap*")) {
+                    if (field.equals("size")) {
+                        return "LemonMap_size(" + varName + ")";
+                    }
+                }
+                if (varType.equals("StringBuilder*")) {
+                    if (field.equals("length")) {
+                        return "StringBuilder_length(" + varName + ")";
+                    }
+                }
+            }
+        }
+        // Check inferred type for field access
+        String inferredClass = this.inferClassFromExpr(expr.receiver);
+        if (inferredClass != null) {
+            if (inferredClass.equals("LemonArray")) {
+                if (field.equals("length") || field.equals("size")) {
+                    return "LemonArray_size(" + this.genExpr(expr.receiver) + ")";
+                }
+            }
+            if (inferredClass.equals("LemonMap")) {
+                if (field.equals("size")) {
+                    return "LemonMap_size(" + this.genExpr(expr.receiver) + ")";
+                }
             }
         }
         String objStr = this.genExpr(expr.receiver);
@@ -1388,7 +1649,10 @@ class CCodeGen {
 
         // Method call via FieldAccess: obj.method(args)
         if (expr.callee.kind == ExprKind.FieldAccess) {
-            return this.genMethodCallExpr(expr);
+            // Extract object and method name from FieldAccess callee
+            Expr obj = expr.callee.receiver;
+            String method = expr.callee.strValue;
+            return this.genObjMethodCall(obj, method, expr.args);
         }
 
         // Super call
@@ -1414,14 +1678,13 @@ class CCodeGen {
 
     // ---- MethodCall 表达式 ----
 
-    private String genMethodCallExpr(Expr expr) {
-        String method = expr.strValue;
+    // Handle method calls: obj.method(args)
+    // Called from genCallExpr for FieldAccess callees and from genExpr for MethodCall expressions
+    private String genObjMethodCall(Expr obj, String method, Array<Expr> args) {
         String argsStr = "";
-        for (int ai = 0; ai < expr.args.size(); ai++) {
-            argsStr = argsStr + ", " + this.genExpr(expr.args.get(ai));
+        for (int ai = 0; ai < args.size(); ai++) {
+            argsStr = argsStr + ", " + this.genExpr(args.get(ai));
         }
-
-        Expr obj = expr.receiver;
 
         // this.method() or self.method()
         if (obj.kind == ExprKind.This || obj.kind == ExprKind.Super) {
@@ -1435,25 +1698,25 @@ class CCodeGen {
             String varName = obj.strValue;
             // Builtin type methods
             if (varName.equals("System")) {
-                return this.genBuiltinTypeMethodCall("System", method, expr.args);
+                return this.genBuiltinTypeMethodCall("System", method, args);
             }
             if (varName.equals("String")) {
-                return this.genBuiltinTypeMethodCall("String", method, expr.args);
+                return this.genBuiltinTypeMethodCall("String", method, args);
             }
             if (varName.equals("Array")) {
-                return this.genBuiltinTypeMethodCallWithWrap("Array", method, expr.args);
+                return this.genBuiltinTypeMethodCallWithWrap("Array", method, args);
             }
             if (varName.equals("Map") || varName.equals("HashMap")) {
-                return this.genBuiltinTypeMethodCallWithWrap("Map", method, expr.args);
+                return this.genBuiltinTypeMethodCallWithWrap("Map", method, args);
             }
             if (varName.equals("StringBuilder")) {
-                return this.genBuiltinTypeMethodCall("StringBuilder", method, expr.args);
+                return this.genBuiltinTypeMethodCall("StringBuilder", method, args);
             }
             if (varName.equals("Character")) {
-                return this.genBuiltinTypeMethodCall("Character", method, expr.args);
+                return this.genBuiltinTypeMethodCall("Character", method, args);
             }
             if (varName.equals("File")) {
-                return this.genBuiltinTypeMethodCall("File", method, expr.args);
+                return this.genBuiltinTypeMethodCall("File", method, args);
             }
 
             // Check if variable is a known type
@@ -1461,17 +1724,24 @@ class CCodeGen {
             if (varType != null) {
                 // String method
                 if (this.isStringCType(varType)) {
+                    // substring with 1 arg uses String_substring_from, 2 args uses String_substring_from_to (end semantics)
+                    if (method.equals("substring") && args.size() == 1) {
+                        return "String_substring_from(" + varName + argsStr + ")";
+                    }
+                    if (method.equals("substring") && args.size() == 2) {
+                        return "String_substring_from_to(" + varName + argsStr + ")";
+                    }
                     return "String_" + method + "(" + varName + argsStr + ")";
                 }
                 // Array method - wrap int args for void* params
                 if (varType.equals("LemonArray*")) {
-                    String wrappedArgs = this.wrapContainerArgs("LemonArray", method, varName, expr.args);
+                    String wrappedArgs = this.wrapContainerArgs("LemonArray", method, varName, args);
                     String result = "LemonArray_" + method + "(" + varName + wrappedArgs + ")";
                     return result;
                 }
                 // Map method - wrap int args for void* params, unwrap get result
                 if (varType.equals("LemonMap*")) {
-                    String wrappedArgs = this.wrapContainerArgs("LemonMap", method, varName, expr.args);
+                    String wrappedArgs = this.wrapContainerArgs("LemonMap", method, varName, args);
                     String result = "LemonMap_" + method + "(" + varName + wrappedArgs + ")";
                     // Unwrap get result for primitive value types
                     if (method.equals("get")) {
@@ -1500,15 +1770,24 @@ class CCodeGen {
         if (inferredClass != null) {
             // Handle LemonArray/LemonMap method calls with int arg wrapping
             if (inferredClass.equals("LemonArray") || inferredClass.equals("LemonMap")) {
-                String wrappedArgs = this.wrapContainerArgsFromStr(inferredClass, method, expr.args);
+                String wrappedArgs = this.wrapContainerArgsFromStr(inferredClass, method, args);
                 String result = inferredClass + "_" + method + "(" + objStr + wrappedArgs + ")";
                 if (inferredClass.equals("LemonMap") && method.equals("get")) {
                     String valueType = this.inferMapValueType(obj);
                     if (valueType != null && this.isPrimitiveCType(valueType)) {
-                        result = "(" + valueType + ")(intptr_t)" + result;
+                        result = "(" + valueType + "(intptr_t)" + result;
                     }
                 }
                 return result;
+            }
+            // String method with substring special handling
+            if (inferredClass.equals("String")) {
+                if (method.equals("substring") && args.size() == 1) {
+                    return "String_substring_from(" + objStr + argsStr + ")";
+                }
+                if (method.equals("substring") && args.size() == 2) {
+                    return "String_substring_from_to(" + objStr + argsStr + ")";
+                }
             }
             return inferredClass + "_" + method + "(" + objStr + argsStr + ")";
         }
@@ -1573,7 +1852,7 @@ class CCodeGen {
             return "LemonMap_" + method + "(" + argsStr + ")";
         }
         if (typeName.equals("System")) {
-            return argsStr;
+            return method + "(" + argsStr + ")";
         }
         return typeName + "_" + method + "(" + argsStr + ")";
     }
@@ -1636,11 +1915,70 @@ class CCodeGen {
                 return true;
             }
         }
+        if (expr.kind == ExprKind.MethodCall) {
+            String method = expr.strValue;
+            if (method.equals("substring") || method.equals("toUpperCase") || method.equals("toLowerCase")
+                || method.equals("trim") || method.equals("replace") || method.equals("concat")
+                || method.equals("intToString") || method.equals("longToString") || method.equals("doubleToString")
+                || method.equals("fromChar") || method.equals("fromCharArray") || method.equals("join")) {
+                return true;
+            }
+        }
+        if (expr.kind == ExprKind.Call) {
+            // Call(FieldAccess(obj, method), args) - check if method returns string
+            if (expr.callee != null && expr.callee.kind == ExprKind.FieldAccess) {
+                String method = expr.callee.strValue;
+                // Known string-returning methods
+                if (method.equals("intToString") || method.equals("longToString") || method.equals("doubleToString")
+                    || method.equals("toString") || method.equals("fromChar") || method.equals("fromCharArray")
+                    || method.equals("join") || method.equals("substring") || method.equals("toUpperCase")
+                    || method.equals("toLowerCase") || method.equals("trim") || method.equals("replace")
+                    || method.equals("concat")) {
+                    return true;
+                }
+                // Known string-returning methods on CCodeGen and other classes
+                if (method.equals("ct") || method.equals("c_type") || method.equals("genExpr")
+                    || method.equals("escapeCString") || method.equals("mangled_generic_name")
+                    || method.equals("mangled_type_name") || method.equals("freshStringLiteral")
+                    || method.equals("freshExcVar") || method.equals("freshMatchVar")) {
+                    return true;
+                }
+                // Check if the object is a String type
+                String objClass = this.inferClassFromExpr(expr.callee.receiver);
+                if (objClass != null && objClass.equals("String")) {
+                    return true;
+                }
+            }
+        }
+        if (expr.kind == ExprKind.BinaryOp) {
+            // String concatenation with + : if left is string type, result is string
+            if (expr.strValue.equals("+")) {
+                return this.exprIsStringType(expr.left);
+            }
+        }
         return false;
     }
 
     private bool isStringCType(String ct) {
         return ct.equals("char*") || ct.equals("const char*");
+    }
+
+    private String inferArrayAccessElementType(Expr expr) {
+        if (expr.kind != ExprKind.ArrayAccess) return null;
+        // Check if receiver is a known string array variable
+        if (expr.receiver.kind == ExprKind.Variable) {
+            String varName = expr.receiver.strValue;
+            String varType = this.varTypes.get(varName);
+            if (varType != null && varType.equals("LemonArray*")) {
+                // Default: void* for generic arrays
+                return "void*";
+            }
+            // args parameter in main is String[]
+            if (varName.equals("args")) {
+                return "const char*";
+            }
+        }
+        return null;
     }
 
     private String inferClassFromExpr(Expr expr) {
@@ -1652,12 +1990,71 @@ class CCodeGen {
         }
         if (expr.kind == ExprKind.FieldAccess) {
             String field = expr.strValue;
+            // Check local variable types first
             String varType = this.varTypes.get(field);
             if (varType != null && varType.endsWith("*")) {
                 return varType.substring(0, varType.length() - 1);
             }
+            // Check field type on the receiver's class using method signatures
+            String objClass = this.inferClassFromExpr(expr.receiver);
+            if (objClass != null) {
+                // Look up field type from methodSignatures-style lookup
+                String fieldCType = this.lookupFieldType(objClass, field);
+                if (fieldCType != null) {
+                    if (fieldCType.equals("const char*")) {
+                        return "String";
+                    }
+                    if (fieldCType.endsWith("*")) {
+                        return fieldCType.substring(0, fieldCType.length() - 1);
+                    }
+                }
+            }
+        }
+        if (expr.kind == ExprKind.Call) {
+            // Call(FieldAccess(obj, method), args) - check if method returns a class type
+            if (expr.callee != null && expr.callee.kind == ExprKind.FieldAccess) {
+                String method = expr.callee.strValue;
+                // Known string-returning methods
+                if (method.equals("concat") || method.equals("substring") || method.equals("toUpperCase")
+                    || method.equals("toLowerCase") || method.equals("trim") || method.equals("replace")
+                    || method.equals("intToString") || method.equals("longToString") || method.equals("doubleToString")
+                    || method.equals("fromChar") || method.equals("fromCharArray") || method.equals("join")
+                    || method.equals("toString") || method.equals("escapeCString") || method.equals("genExpr")
+                    || method.equals("ct") || method.equals("c_type") || method.equals("mangled_generic_name")
+                    || method.equals("mangled_type_name") || method.equals("freshStringLiteral")
+                    || method.equals("freshExcVar") || method.equals("freshMatchVar")) {
+                    return "String";
+                }
+            }
+        }
+        if (expr.kind == ExprKind.MethodCall) {
+            String method = expr.strValue;
+            // Known string-returning methods
+            if (method.equals("substring") || method.equals("toUpperCase") || method.equals("toLowerCase")
+                || method.equals("trim") || method.equals("replace") || method.equals("concat")
+                || method.equals("intToString") || method.equals("longToString") || method.equals("doubleToString")
+                || method.equals("fromChar") || method.equals("fromCharArray") || method.equals("join")
+                || method.equals("toString") || method.equals("escapeCString") || method.equals("genExpr")
+                || method.equals("ct") || method.equals("c_type") || method.equals("mangled_generic_name")
+                || method.equals("mangled_type_name") || method.equals("freshStringLiteral")
+                || method.equals("freshExcVar") || method.equals("freshMatchVar")) {
+                return "String";
+            }
+        }
+        if (expr.kind == ExprKind.BinaryOp) {
+            // String concatenation with + returns String
+            if (expr.strValue.equals("+") && this.exprIsStringType(expr.left)) {
+                return "String";
+            }
         }
         return null;
+    }
+
+    // Look up field type by class name and field name
+    private String lookupFieldType(String className, String fieldName) {
+        Map<String, String> fieldTypeMap = this.classFieldTypeMap.get(className);
+        if (fieldTypeMap == null) return null;
+        return fieldTypeMap.get(fieldName);
     }
 
     private String inferTypeFromExpr(Expr expr) {
@@ -1669,6 +2066,28 @@ class CCodeGen {
         if (expr.kind == ExprKind.FloatLiteral) return "float";
         if (expr.kind == ExprKind.BoolLiteral) return "int32_t";
         if (expr.kind == ExprKind.StringLiteral) return "const char*";
+        if (expr.kind == ExprKind.FieldAccess) {
+            String objClass = this.inferClassFromExpr(expr.receiver);
+            if (objClass != null) {
+                String ftype = this.lookupFieldType(objClass, expr.strValue);
+                if (ftype != null) return ftype;
+            }
+            // Check local variable types
+            String varType = this.varTypes.get(expr.strValue);
+            if (varType != null) return varType;
+        }
+        if (expr.kind == ExprKind.Call || expr.kind == ExprKind.MethodCall) {
+            String className = this.inferClassFromExpr(expr);
+            if (className != null) {
+                if (className.equals("String")) return "const char*";
+                return className + "*";
+            }
+        }
+        if (expr.kind == ExprKind.BinaryOp) {
+            if (expr.strValue.equals("+") && this.exprIsStringType(expr.left)) {
+                return "const char*";
+            }
+        }
         return "void*";
     }
 
@@ -1899,10 +2318,10 @@ class CCodeGen {
     private bool isMacroConstant(String s) {
         if (s == null || s.length() == 0) return false;
         for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            bool isUpper = (c >= 'A' && c <= 'Z');
-            bool isDigit = (c >= '0' && c <= '9');
-            if (!isUpper && !isDigit && c != '_') return false;
+            int c = (int)s.charAt(i);
+            bool isUpper = (c >= 65 && c <= 90);  // 'A'-'Z'
+            bool isDigit = (c >= 48 && c <= 57);  // '0'-'9'
+            if (!isUpper && !isDigit && c != 95) return false;  // '_'
         }
         return true;
     }

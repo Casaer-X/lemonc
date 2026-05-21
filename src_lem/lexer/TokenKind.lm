@@ -105,6 +105,7 @@ class TokenKind {
     public static int Semicolon = 101;
     public static int Colon = 102;
     public static int Question = 103;
+    public static int NullCoalesce = 106;
     public static int EndOfFile = 104;
     public static int Error = 105;
 
@@ -213,6 +214,7 @@ class TokenKind {
         if (kind == TokenKind.Semicolon) return ";";
         if (kind == TokenKind.Colon) return ":";
         if (kind == TokenKind.Question) return "?";
+        if (kind == TokenKind.NullCoalesce) return "??";
         if (kind == TokenKind.EndOfFile) return "EOF";
         if (kind == TokenKind.Error) return "Error";
         return "Unknown";

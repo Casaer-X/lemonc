@@ -54,6 +54,7 @@ class BinaryOp {
     public static int Gt = 15;
     public static int Le = 16;
     public static int Ge = 17;
+    public static int NullCoalesce = 18;
 
     public static String toString(int op) {
         if (op == BinaryOp.Add) return "+";
@@ -74,7 +75,8 @@ class BinaryOp {
         if (op == BinaryOp.Gt) return ">";
         if (op == BinaryOp.Le) return "<=";
         if (op == BinaryOp.Ge) return ">=";
-        return "?";
+        if (op == BinaryOp.NullCoalesce) return "??";
+        return "??";
     }
 }
 

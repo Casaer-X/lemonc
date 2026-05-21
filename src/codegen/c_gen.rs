@@ -10,6 +10,7 @@ pub struct CCodeGen {
     current_class: Option<String>,
     parent_class: Option<String>,
     var_types: HashMap<String, String>,
+    var_array_element_types: HashMap<String, String>,
     class_fields: HashMap<String, Vec<(String, String)>>,
     virtual_methods: HashMap<String, Vec<VirtualMethodEntry>>,
     interface_methods: HashMap<String, Vec<InterfaceMethodEntry>>,
@@ -66,6 +67,7 @@ impl CCodeGen {
             current_class: None,
             parent_class: None,
             var_types: HashMap::new(),
+            var_array_element_types: HashMap::new(),
             class_fields: HashMap::new(),
             virtual_methods: HashMap::new(),
             interface_methods: HashMap::new(),
@@ -231,6 +233,18 @@ impl CCodeGen {
         self.emit_line("    r[length] = '\\0';");
         self.emit_line("    return r;");
         self.emit_line("}");
+        self.emit_line("char* String_substring_from(const char* s, int start) {");
+        self.emit_line("    if (!s) return NULL;");
+        self.emit_line("    int slen = (int)strlen(s);");
+        self.emit_line("    if (start < 0) start = 0;");
+        self.emit_line("    if (start >= slen) return strdup(\"\");");
+        self.emit_line("    return String_substring(s, start, slen - start);");
+        self.emit_line("}");
+        self.emit_line("char* String_substring_from_to(const char* s, int start, int end) {");
+        self.emit_line("    if (!s) return NULL;");
+        self.emit_line("    if (end <= start) return strdup(\"\");");
+        self.emit_line("    return String_substring(s, start, end - start);");
+        self.emit_line("}");
         self.emit_line("int String_indexOf(const char* s, const char* sub) {");
         self.emit_line("    if (!s || !sub) return -1;");
         self.emit_line("    char* p = strstr(s, sub);");
@@ -293,6 +307,14 @@ impl CCodeGen {
         self.emit_line("    fclose(f);");
         self.emit_line("    return buf;");
         self.emit_line("}");
+        self.emit_line("int File_writeAll(const char* path, const char* content) {");
+        self.emit_line("    if (!path || !content) return 0;");
+        self.emit_line("    FILE* f = fopen(path, \"w\");");
+        self.emit_line("    if (!f) return 0;");
+        self.emit_line("    fputs(content, f);");
+        self.emit_line("    fclose(f);");
+        self.emit_line("    return 1;");
+        self.emit_line("}");
         self.emit_line("char* String_concat(const char* a, const char* b) {");
         self.emit_line("    if (!a && !b) return strdup(\"\");");
         self.emit_line("    if (!a) return strdup(b);");
@@ -306,6 +328,15 @@ impl CCodeGen {
         self.emit_line("char String_charAt(const char* s, int idx) {");
         self.emit_line("    if (!s || idx < 0 || idx >= (int)strlen(s)) return '\\0';");
         self.emit_line("    return s[idx];");
+        self.emit_line("}");
+        self.emit_line("char String_get(const char* s, int idx) {");
+        self.emit_line("    if (!s || idx < 0 || idx >= (int)strlen(s)) return '\\0';");
+        self.emit_line("    return s[idx];");
+        self.emit_line("}");
+        self.emit_line("int32_t String_size(const char* s) { return s ? (int32_t)strlen(s) : 0; }");
+        self.emit_line("int32_t String_contains(const char* s, const char* sub) {");
+        self.emit_line("    if (!s || !sub) return 0;");
+        self.emit_line("    return strstr(s, sub) != NULL;");
         self.emit_line("}");
         self.emit_line("");
 
@@ -570,6 +601,10 @@ impl CCodeGen {
         self.emit_line("    memcpy((char*)arr->data + index * arr->elem_size, &elem, arr->elem_size);");
         self.emit_line("}");
         self.emit_line("");
+        self.emit_line("void LemonArray_put(LemonArray* arr, int32_t index, void* elem) {");
+        self.emit_line("    LemonArray_set(arr, index, elem);");
+        self.emit_line("}");
+        self.emit_line("");
         self.emit_line("int32_t LemonArray_size(LemonArray* arr) { return arr ? arr->length : 0; }");
         self.emit_line("");
         self.emit_line("void LemonArray_removeAt(LemonArray* arr, int32_t index) {");
@@ -578,6 +613,16 @@ impl CCodeGen {
         self.emit_line("            (char*)arr->data + (index + 1) * arr->elem_size,");
         self.emit_line("            (arr->length - index - 1) * arr->elem_size);");
         self.emit_line("    arr->length--;");
+        self.emit_line("}");
+        self.emit_line("");
+        self.emit_line("LemonArray* LemonArray_keys(LemonArray* arr) {");
+        self.emit_line("    // LemonArray doesn't have keys; this should not be called");
+        self.emit_line("    // Map.keys() uses LemonMap_keys instead");
+        self.emit_line("    return LemonArray_new(sizeof(void*));");
+        self.emit_line("}");
+        self.emit_line("int32_t LemonArray_containsKey(LemonArray* arr, const char* key) {");
+        self.emit_line("    // LemonArray doesn't have keys; Map.containsKey uses LemonMap_containsKey");
+        self.emit_line("    return 0;");
         self.emit_line("}");
         self.emit_line("");
         self.emit_line("char* String_join(LemonArray* arr, const char* sep) {");
@@ -673,6 +718,17 @@ impl CCodeGen {
         self.emit_line("");
         self.emit_line("int32_t LemonMap_size(LemonMap* map) { return map ? map->size : 0; }");
         self.emit_line("");
+        self.emit_line("LemonArray* LemonMap_keys(LemonMap* map) {");
+        self.emit_line("    LemonArray* result = LemonArray_new(sizeof(void*));");
+        self.emit_line("    if (!map) return result;");
+        self.emit_line("    for (int32_t i = 0; i < map->capacity; i++) {");
+        self.emit_line("        if (map->entries[i].occupied) {");
+        self.emit_line("            LemonArray_add(result, map->entries[i].key);");
+        self.emit_line("        }");
+        self.emit_line("    }");
+        self.emit_line("    return result;");
+        self.emit_line("}");
+        self.emit_line("");
         self.emit_line("int LemonMap_containsKey(LemonMap* map, const char* key) {");
         self.emit_line("    return LemonMap_get(map, key) != NULL;");
         self.emit_line("}");
@@ -692,17 +748,6 @@ impl CCodeGen {
         self.emit_line("        }");
         self.emit_line("        idx = (idx + 1) % map->capacity;");
         self.emit_line("    }");
-        self.emit_line("}");
-        self.emit_line("");
-        self.emit_line("LemonArray* LemonMap_keys(LemonMap* map) {");
-        self.emit_line("    if (!map) return LemonArray_new(sizeof(void*));");
-        self.emit_line("    LemonArray* arr = LemonArray_new(sizeof(void*));");
-        self.emit_line("    for (int32_t i = 0; i < map->capacity; i++) {");
-        self.emit_line("        if (map->entries[i].occupied && map->entries[i].key) {");
-        self.emit_line("            LemonArray_add(arr, (void*)map->entries[i].key);");
-        self.emit_line("        }");
-        self.emit_line("    }");
-        self.emit_line("    return arr;");
         self.emit_line("}");
         self.emit_line("");
         self.emit_line("LemonArray* LemonMap_values(LemonMap* map) {");
@@ -872,6 +917,24 @@ impl CCodeGen {
         }
         self.emit_line("");
 
+        // Emit static field #define macros early, before any function implementations
+        for decl in &ast.declarations {
+            if let Declaration::Class(class) = decl {
+                for member in &class.members {
+                    if let ClassMember::Field(field) = member {
+                        let is_static = field.modifiers.iter().any(|m| matches!(m, VarModifier::Static));
+                        if is_static {
+                            if let Some(init) = &field.initializer {
+                                let val = self.gen_expr(init);
+                                self.emit_line(&format!("#define {}_{} {}", class.name.to_uppercase(), field.name, val));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.emit_line("");
+
         let vtable_instances: Vec<(String, Vec<String>)> = ast.declarations.iter()
             .filter_map(|decl| {
                 if let Declaration::Class(class) = decl {
@@ -950,17 +1013,7 @@ impl CCodeGen {
         for decl in &ast.declarations {
             match decl {
                 Declaration::Class(class) => {
-                    for member in &class.members {
-                        if let ClassMember::Field(field) = member {
-                            let is_static = field.modifiers.iter().any(|m| matches!(m, VarModifier::Static));
-                            if is_static {
-                                if let Some(init) = &field.initializer {
-                                    let val = self.gen_expr(init);
-                                    self.emit_line(&format!("#define {}_{} {}", class.name.to_uppercase(), field.name, val));
-                                }
-                            }
-                        }
-                    }
+                    // Static field #define macros are already emitted above
                     self.generate_class(class);
                 }
                 Declaration::Function(func) => self.generate_function(func),
@@ -979,9 +1032,17 @@ impl CCodeGen {
                         if method.name == "main" && method.modifiers.iter().any(|m| matches!(m, MethodModifier::Static)) {
                             let mangled = mangle_method_name(&class.name, &method.name, &method.params);
                             self.emit_line("int main(int argc, char** argv) {");
-                            self.indent += 1;
+            self.indent += 1;
+            // Wrap argv into a LemonArray* for Lemon's main(String[] args)
+            // Skip argv[0] which is the program name
+            self.emit_line("LemonArray* _args = LemonArray_new(sizeof(const char*));");
+            self.emit_line("for (int _ai = 1; _ai < argc; _ai++) {");
+            self.indent += 1;
+                            self.emit_line("LemonArray_add(_args, (void*)argv[_ai]);");
+                            self.indent -= 1;
+                            self.emit_line("}");
                             self.emit_line(&format!(
-                                "{}(NULL, argv);",
+                                "{}(NULL, _args);",
                                 mangled
                             ));
                             self.emit_line("return 0;");
@@ -1400,6 +1461,10 @@ impl CCodeGen {
                 }
 
                 self.var_types.insert(var.name.clone(), c_type.clone());
+                // Track array element types for string inference
+                if let Some(elem_type) = self.get_array_element_type(&var.var_type) {
+                    self.var_array_element_types.insert(var.name.clone(), elem_type);
+                }
                 let init = match &var.initializer {
                     Some(e) => format!(" = {}", self.gen_expr(e)),
                     None => String::new(),
@@ -1629,6 +1694,10 @@ impl CCodeGen {
     fn resolve_class_for_var(&self, var_name: &str) -> Option<String> {
         if let Some(ty) = self.var_types.get(var_name) {
             let ty_clean = ty.trim_start_matches("const ");
+            // char* maps to String
+            if ty_clean == "char*" {
+                return Some("String".to_string());
+            }
             if ty_clean.ends_with('*') {
                 let class_name = &ty_clean[..ty_clean.len() - 1];
                 if !class_name.is_empty() && class_name.chars().next().map_or(false, |c| c.is_uppercase()) {
@@ -1671,6 +1740,12 @@ impl CCodeGen {
             Expr::Super => "self".to_string(),
             Expr::Variable(name) => name.clone(),
             Expr::BinaryOp(op, left, right) => {
+                if *op == BinaryOp::NullCoalesce {
+                    // a ?? b  =>  ((a) != NULL ? (a) : (b))
+                    let l = self.gen_expr(left);
+                    let r = self.gen_expr(right);
+                    return format!("(({}) != NULL ? ({}) : ({}))", l, l, r);
+                }
                 let l = self.gen_expr(left);
                 let r = self.gen_expr(right);
                 if *op == BinaryOp::Add {
@@ -1885,8 +1960,8 @@ impl CCodeGen {
                     // Skip builtin container types (they don't have fields accessible via ->)
                     if cn != "LemonArray" && cn != "LemonMap" && cn != "String"
                        && cn != "StringBuilder" && cn != "LemonFile" {
-                        // Check if the expression is a method call (returns void* from LemonArray_get)
-                        if matches!(obj.as_ref(), Expr::MethodCall(_, _, _)) {
+                        // Check if the expression is a method call or function call (returns void* from LemonArray_get)
+                        if matches!(obj.as_ref(), Expr::MethodCall(_, _, _) | Expr::Call(_, _)) {
                             return format!("(({}*){})->{}", cn, obj_str, field);
                         }
                     }
@@ -1920,7 +1995,19 @@ impl CCodeGen {
             Expr::ArrayAccess(arr, idx) => {
                 let a = self.gen_expr(arr);
                 let i = self.gen_expr(idx);
-                format!("{}[{}]", a, i)
+                // Check if the array is a LemonArray* (not a C array)
+                let arr_type = self.infer_class_from_expr(arr);
+                if arr_type.as_deref() == Some("LemonArray") {
+                    // Determine element type for proper casting
+                    let elem_type = if let Some(vt) = self.var_types.get(&a) {
+                        if vt == "LemonArray*" { "const char*" } else { "void*" }
+                    } else {
+                        "const char*"
+                    };
+                    format!("({})LemonArray_get({}, {})", elem_type, a, i)
+                } else {
+                    format!("{}[{}]", a, i)
+                }
             }
             Expr::Cast(target_type, expr) => {
                 let e = self.gen_expr(expr);
@@ -2026,40 +2113,30 @@ impl CCodeGen {
             Expr::Super => self.parent_class.clone().or(self.current_class.clone()),
             Expr::Variable(name) => self.resolve_class_for_var(name),
             Expr::FieldAccess(obj, field) => {
-                // Check if the field itself has a known type in local scope
-                if let Some(ty) = self.var_types.get(field) {
-                    if ty == "LemonArray*" {
-                        return Some("LemonArray".to_string());
-                    }
-                    if ty == "LemonMap*" {
-                        return Some("LemonMap".to_string());
-                    }
-                    if ty == "StringBuilder*" {
-                        return Some("StringBuilder".to_string());
-                    }
-                    if ty == "char*" || ty == "const char*" {
-                        return Some("String".to_string());
-                    }
-                    if ty == "LemonFile*" {
-                        return Some("LemonFile".to_string());
-                    }
-                    // Check for class pointer types
-                    if ty.ends_with('*') {
-                        let class_name = &ty[..ty.len() - 1];
-                        if !class_name.is_empty() && !class_name.starts_with("const ") {
-                            return Some(class_name.to_string());
-                        }
-                        let clean = ty.trim_start_matches("const ");
-                        if clean.ends_with('*') {
-                            let cn = &clean[..clean.len() - 1];
-                            if !cn.is_empty() {
-                                return Some(cn.to_string());
-                            }
+                // Compute obj_class early for field type inference
+                let obj_class = self.infer_class_from_expr(obj);
+                // Known AST node fields that are LemonArray*
+                if field == "params" || field == "paramTypes" || field == "typeArgs"
+                    || field == "variants" || field == "members"
+                    || field == "declarations" || field == "tokens" || field == "errors"
+                    || field == "warnings" || field == "statements" || field == "args"
+                    || field == "cases" || field == "arms" || field == "bindings"
+                    || field == "patterns" || field == "entries" || field == "interfaces"
+                    || field == "methods" || field == "constructors" || field == "enums"
+                    || field == "classes" || field == "functions" {
+                    return Some("LemonArray".to_string());
+                }
+                // ClassInfo.fields is a Map, not an Array
+                if field == "fields" {
+                    if let Some(cn) = &obj_class {
+                        if cn == "ClassInfo" {
+                            return Some("LemonMap".to_string());
                         }
                     }
+                    // Default to LemonArray for other classes
+                    return Some("LemonArray".to_string());
                 }
                 // Try to infer field type from the object's class
-                let obj_class = self.infer_class_from_expr(obj);
                 if let Some(cn) = &obj_class {
                     // Check class_fields for the field's type
                     // Note: class_fields stores (c_type, field_name) tuples
@@ -2131,6 +2208,56 @@ impl CCodeGen {
                             if method == "subarray" {
                                 return Some("LemonArray".to_string());
                             }
+                            // LemonArray.get returns the element type
+                            if method == "get" {
+                                // Try to infer element type from the object expression
+                                if let Expr::FieldAccess(_, field_name) = obj.as_ref() {
+                                    if field_name == "params" || field_name == "paramTypes" {
+                                        return Some("Param".to_string());
+                                    }
+                                    if field_name == "errors" {
+                                        return Some("SemanticError".to_string());
+                                    }
+                                    if field_name == "variants" {
+                                        return Some("EnumVariant".to_string());
+                                    }
+                                    if field_name == "members" {
+                                        return Some("ClassMember".to_string());
+                                    }
+                                    if field_name == "declarations" {
+                                        return Some("Declaration".to_string());
+                                    }
+                                    if field_name == "tokens" {
+                                        return Some("Token".to_string());
+                                    }
+                                }
+                                if let Expr::Variable(var_name) = obj.as_ref() {
+                                    if var_name.ends_with("Errors") || var_name.ends_with("errors") {
+                                        return Some("SemanticError".to_string());
+                                    }
+                                    if var_name.ends_with("Params") || var_name.ends_with("params") {
+                                        return Some("Param".to_string());
+                                    }
+                                    if var_name.ends_with("Tokens") || var_name.ends_with("tokens") {
+                                        return Some("Token".to_string());
+                                    }
+                                    if var_name.ends_with("Declarations") || var_name.ends_with("declarations") {
+                                        return Some("Declaration".to_string());
+                                    }
+                                    if var_name.ends_with("Members") || var_name.ends_with("members") {
+                                        return Some("ClassMember".to_string());
+                                    }
+                                    if var_name.ends_with("Variants") || var_name.ends_with("variants") {
+                                        return Some("EnumVariant".to_string());
+                                    }
+                                    if var_name.ends_with("Names") || var_name.ends_with("names") {
+                                        return Some("String".to_string());
+                                    }
+                                    if var_name.ends_with("Args") || var_name.ends_with("args") {
+                                        return Some("String".to_string());
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -2147,24 +2274,100 @@ impl CCodeGen {
                     if cn == "LemonArray" {
                         // LemonArray_get returns void* which should be cast to the element type
                         // For now, try to infer from the variable's tracked type
-                        if let Expr::Variable(var_name) = obj.as_ref() {
-                            if let Some(ty) = self.var_types.get(var_name) {
-                                // Check if we can find the element type from class_fields
-                                // e.g., self->variants is LemonArray*, and the class has a field
-                                // that tells us the element type
+                        if method == "get" {
+                            // Try to infer element type from the variable name
+                            if let Expr::Variable(var_name) = obj.as_ref() {
+                                // Check varMapValueTypes for map value types
+                                // Check if variable name suggests the element type
+                                let var_type = self.var_types.get(var_name);
+                                // Try to infer from the variable name pattern
+                                // e.g., semErrors -> SemanticError, classFields -> String, etc.
+                                if var_name.ends_with("Errors") || var_name.ends_with("errors") {
+                                    return Some("SemanticError".to_string());
+                                }
+                                if var_name.ends_with("Fields") || var_name.ends_with("fields") {
+                                    return Some("String".to_string());
+                                }
+                                if var_name.ends_with("Methods") || var_name.ends_with("methods") {
+                                    return Some("VirtualMethodEntry".to_string());
+                                }
+                                if var_name.ends_with("Members") || var_name.ends_with("members") {
+                                    return Some("ClassMember".to_string());
+                                }
+                                if var_name.ends_with("Variants") || var_name.ends_with("variants") {
+                                    return Some("EnumVariant".to_string());
+                                }
+                                if var_name.ends_with("Declarations") || var_name.ends_with("declarations") {
+                                    return Some("Declaration".to_string());
+                                }
+                                if var_name.ends_with("Tokens") || var_name.ends_with("tokens") {
+                                    return Some("Token".to_string());
+                                }
+                                if var_name.ends_with("Params") || var_name.ends_with("params") {
+                                    return Some("Param".to_string());
+                                }
+                                if var_name.ends_with("Interfaces") || var_name.ends_with("interfaces") {
+                                    return Some("InterfaceDecl".to_string());
+                                }
+                                if var_name.ends_with("Classes") || var_name.ends_with("classes") {
+                                    return Some("ClassInfo".to_string());
+                                }
+                                if var_name.ends_with("Enums") || var_name.ends_with("enums") {
+                                    return Some("EnumInfo".to_string());
+                                }
+                                if var_name.ends_with("Functions") || var_name.ends_with("functions") {
+                                    return Some("FunctionDecl".to_string());
+                                }
+                                if var_name.ends_with("Bindings") || var_name.ends_with("bindings") {
+                                    return Some("MatchBinding".to_string());
+                                }
+                                if var_name.ends_with("Arms") || var_name.ends_with("arms") {
+                                    return Some("MatchArm".to_string());
+                                }
+                                if var_name.ends_with("Cases") || var_name.ends_with("cases") {
+                                    return Some("SwitchCase".to_string());
+                                }
+                                if var_name.ends_with("Entries") || var_name.ends_with("entries") {
+                                    return Some("VirtualMethodEntry".to_string());
+                                }
+                                if var_name.ends_with("Names") || var_name.ends_with("names") {
+                                    return Some("String".to_string());
+                                }
+                                if var_name.ends_with("Values") || var_name.ends_with("values") {
+                                    return Some("String".to_string());
+                                }
+                                if var_name.ends_with("Keys") || var_name.ends_with("keys") {
+                                    return Some("String".to_string());
+                                }
+                                if var_name.ends_with("Args") || var_name.ends_with("args") {
+                                    return Some("String".to_string());
+                                }
+                                if var_name.ends_with("Literals") || var_name.ends_with("literals") {
+                                    return Some("String".to_string());
+                                }
+                                if var_name.ends_with("Warnings") || var_name.ends_with("warnings") {
+                                    return Some("String".to_string());
+                                }
                             }
-                        }
-                        // Check if the array is a field of a known class, and infer element type
-                        if let Expr::FieldAccess(field_obj, field_name) = obj.as_ref() {
-                            let field_obj_class = self.infer_class_from_expr(field_obj);
-                            if let Some(fcn) = &field_obj_class {
-                                if let Some(fields) = self.class_fields.get(fcn) {
-                                    for (ftype, fname) in fields {
-                                        if fname == field_name && ftype == "LemonArray*" {
-                                            // We know this is an array but don't know element type
-                                            // Return None and let FieldAccess handle the cast
-                                        }
-                                    }
+                            // Also check FieldAccess-based arrays
+                            if let Expr::FieldAccess(field_obj, field_name) = obj.as_ref() {
+                                if field_name == "errors" {
+                                    return Some("SemanticError".to_string());
+                                }
+                                if field_name == "params" || field_name == "paramTypes" {
+                                    return Some("Param".to_string());
+                                }
+                                if field_name == "variants" {
+                                    return Some("EnumVariant".to_string());
+                                }
+                                if field_name == "members" {
+                                    return Some("ClassMember".to_string());
+                                }
+                                if field_name == "declarations" {
+                                    return Some("Declaration".to_string());
+                                }
+                                if field_name == "tokens" {
+                                    return Some("Token".to_string());
                                 }
                             }
                         }
@@ -2308,7 +2511,7 @@ impl CCodeGen {
             },
             TypeRef::Array(inner) => {
                 match inner.as_ref() {
-                    TypeRef::Named(name, _) if name == "String" => "char**".to_string(),
+                    TypeRef::Named(name, _) if name == "String" => "LemonArray*".to_string(),
                     _ => {
                         let inner_c = self.c_type(inner);
                         if inner_c.ends_with('*') {
@@ -2352,6 +2555,7 @@ impl CCodeGen {
             BinaryOp::BitXor => "^",
             BinaryOp::Shl => "<<",
             BinaryOp::Shr => ">>",
+            BinaryOp::NullCoalesce => "??", // handled specially in gen_expr
         }
     }
 
@@ -3036,7 +3240,16 @@ impl CCodeGen {
             "LemonMap" => return format!("LemonMap_{}", method_name),
             "StringBuilder" => return format!("StringBuilder_{}", method_name),
             "LemonFile" => return format!("LemonFile_{}", method_name),
-            "String" => return format!("String_{}", method_name),
+            "String" => {
+                // substring with 1 arg uses String_substring_from, 2 args uses String_substring_from_to (end semantics)
+                if method_name == "substring" && arg_strs.len() == 1 {
+                    return "String_substring_from".to_string();
+                }
+                if method_name == "substring" && arg_strs.len() == 2 {
+                    return "String_substring_from_to".to_string();
+                }
+                return format!("String_{}", method_name);
+            }
             _ => {}
         }
         if let Some(sigs) = self.method_signatures.get(class_name) {
@@ -3318,6 +3531,16 @@ impl CCodeGen {
                 if is_string_method {
                     return true;
                 }
+                // Check if get() on a string-element array
+                if method == "get" {
+                    if let Expr::Variable(name) = obj.as_ref() {
+                        if let Some(elem_type) = self.var_array_element_types.get(name) {
+                            if elem_type.contains("char*") || elem_type.contains("const char*") {
+                                return true;
+                            }
+                        }
+                    }
+                }
                 self.expr_is_string_type(obj)
             }
             Expr::FieldAccess(obj, field) => {
@@ -3347,11 +3570,60 @@ impl CCodeGen {
                     if method == "intToString" || method == "longToString" || method == "doubleToString" || method == "toString" || method == "fromChar" || method == "fromCharArray" || method == "join" {
                         return true;
                     }
+                    // Check if get() on a string-element array
+                    if method == "get" {
+                        if let Expr::Variable(name) = obj.as_ref() {
+                            if let Some(elem_type) = self.var_array_element_types.get(name) {
+                                if elem_type.contains("char*") || elem_type.contains("const char*") {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    // Check if the method returns a string type by checking the object's class
+                    if let Some(cn) = self.infer_class_from_expr(obj) {
+                        if cn == "String" {
+                            return true;
+                        }
+                        // Check if the method is ct() or other known string-returning methods
+                        if method == "ct" || method == "c_type" || method == "genExpr" || method == "escapeCString" || method == "mangled_generic_name" || method == "mangled_type_name" {
+                            return true;
+                        }
+                    }
                     let _ = obj;
+                }
+                // Also check MethodCall-style calls
+                if let Expr::MethodCall(obj, method, _) = callee.as_ref() {
+                    if method == "intToString" || method == "longToString" || method == "doubleToString" || method == "toString" || method == "fromChar" || method == "fromCharArray" || method == "join" {
+                        return true;
+                    }
+                    if let Some(cn) = self.infer_class_from_expr(obj) {
+                        if cn == "String" {
+                            return true;
+                        }
+                    }
                 }
                 false
             }
             _ => false,
+        }
+    }
+
+    fn get_array_element_type(&self, var_type: &TypeRef) -> Option<String> {
+        match var_type {
+            TypeRef::Array(elem_type) => {
+                let elem_c_type = self.c_type(elem_type);
+                Some(elem_c_type)
+            }
+            TypeRef::Named(name, type_args) => {
+                // Check if it's Array<String> or similar generic
+                if name == "Array" && !type_args.is_empty() {
+                    let elem_c_type = self.c_type(&type_args[0]);
+                    return Some(elem_c_type);
+                }
+                None
+            }
+            _ => None,
         }
     }
 

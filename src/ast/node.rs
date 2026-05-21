@@ -292,6 +292,7 @@ pub enum BinaryOp {
     And, Or, BitAnd, BitOr, BitXor,
     Shl, Shr,
     Eq, Ne, Lt, Gt, Le, Ge,
+    NullCoalesce,
 }
 
 #[derive(Debug, Clone, Copy)]

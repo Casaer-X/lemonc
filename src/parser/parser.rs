@@ -1037,6 +1037,7 @@ impl Parser {
     fn get_precedence(kind: &TokenKind) -> u8 {
         match kind {
             TokenKind::Question => 1,
+            TokenKind::NullCoalesce => 1,
             TokenKind::Or => 2,
             TokenKind::And => 3,
             TokenKind::Pipe => 4,
@@ -1069,6 +1070,13 @@ impl Parser {
             }
 
             if let Some(op_kind) = self.peek_kind() {
+                if op_kind == TokenKind::NullCoalesce {
+                    self.advance();
+                    let right = self.parse_expression_with_min_precedence(2);
+                    expr = Expr::BinaryOp(BinaryOp::NullCoalesce, Box::new(expr), Box::new(right));
+                    continue;
+                }
+
                 if op_kind == TokenKind::Question {
                     self.advance();
                     let then_expr = self.parse_expression();
@@ -1269,10 +1277,22 @@ impl Parser {
             TokenKind::LeftParen => {
                 self.advance();
                 if self.is_type_start() {
+                    // Save position to backtrack if this isn't actually a cast
+                    let saved_pos = self.pos;
                     let type_ref = self.parse_type_ref();
-                    self.expect(TokenKind::RightParen).ok();
-                    let expr = self.parse_unary_expression();
-                    Expr::Cast(type_ref, Box::new(expr))
+                    // Check if this is actually a cast: (Type)expr
+                    // vs a parenthesized expression: (variable >= value)
+                    if self.peek_kind() == Some(TokenKind::RightParen) {
+                        self.expect(TokenKind::RightParen).ok();
+                        let expr = self.parse_unary_expression();
+                        Expr::Cast(type_ref, Box::new(expr))
+                    } else {
+                        // Not a cast - backtrack and parse as parenthesized expression
+                        self.pos = saved_pos;
+                        let expr = self.parse_expression();
+                        self.expect(TokenKind::RightParen).ok();
+                        expr
+                    }
                 } else {
                     let expr = self.parse_expression();
                     self.expect(TokenKind::RightParen).ok();

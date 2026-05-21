@@ -570,6 +570,9 @@ impl NativeCodeGen {
                     BinaryOp::BitXor => self.emit(&[0x48, 0x31, 0xC8]),
                     BinaryOp::Shl => self.emit(&[0x48, 0xD3, 0xE0]),
                     BinaryOp::Shr => self.emit(&[0x48, 0xD3, 0xF8]),
+                    BinaryOp::NullCoalesce => {
+                        // null coalesce not supported in native backend
+                    }
                 }
             }
             Expr::UnaryOp(op, operand) => {

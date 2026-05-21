@@ -1,0 +1,127 @@
+package lemon;
+
+import lemon.lexer.Span;
+import lemon.lexer.TokenKind;
+import lemon.lexer.Token;
+import lemon.lexer.Lexer;
+import lemon.parser.AST;
+import lemon.parser.Parser;
+import lemon.semantic.SemanticError;
+import lemon.semantic.SemanticAnalyzer;
+import lemon.codegen.CCodeGen;
+
+class LemonCompiler {
+    public static void main(String[] args) {
+        // Parse command line arguments
+        String outputFile = null;
+        Array<String> inputFiles = new Array<String>();
+
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if (arg.equals("-o") && i + 1 < args.length) {
+                i = i + 1;
+                outputFile = args[i];
+            } else if (!arg.startsWith("-")) {
+                inputFiles.add(arg);
+            }
+        }
+
+        if (inputFiles.size() == 0) {
+            System.printf("Usage: lemonc <input.lm...> [-o output.c]\n");
+            return;
+        }
+
+        // Default output file
+        if (outputFile == null) {
+            String first = inputFiles.get(0);
+            if (first.endsWith(".lm")) {
+                outputFile = first.substring(0, first.length() - 3) + ".c";
+            } else {
+                outputFile = first + ".c";
+            }
+        }
+
+        // Collect all declarations from all input files
+        Array<Declaration> allDeclarations = new Array<Declaration>();
+        int totalTokens = 0;
+
+        for (int fi = 0; fi < inputFiles.size(); fi++) {
+            String inputFile = inputFiles.get(fi);
+
+            // Read source file
+            String source = File.readAll(inputFile);
+            if (source == null) {
+                System.printf("Error: cannot read file '%s'\n", inputFile);
+                return;
+            }
+
+            // Phase 1: Lexical analysis
+            System.printf("[1/5] Lexical analysis (%d/%d)...\n", fi + 1, inputFiles.size());
+            Lexer lexer = new Lexer(source);
+            Array<Token> tokens = lexer.tokenize();
+            totalTokens = totalTokens + tokens.size();
+
+            // Phase 2: Parsing
+            System.printf("[2/5] Parsing (%d/%d)...\n", fi + 1, inputFiles.size());
+            Parser parser = new Parser(tokens);
+            Program program = parser.parse();
+            if (parser.hasErrors()) {
+                Array<String> parseErrors = parser.getErrors();
+                for (int i = 0; i < parseErrors.size(); i++) {
+                    System.printf("  Parse error: %s\n", parseErrors.get(i));
+                }
+                System.printf("  Parsing failed with %d errors\n", parseErrors.size());
+                return;
+            }
+
+            for (int di = 0; di < program.declarations.size(); di++) {
+                allDeclarations.add(program.declarations.get(di));
+            }
+        }
+
+        System.printf("  Tokenized %d tokens (total from %d files)\n", totalTokens, inputFiles.size());
+        System.printf("  Parsed %d declarations (total)\n", allDeclarations.size());
+
+        // Build combined program
+        Program combined = new Program(allDeclarations);
+
+        // Phase 2.5: Semantic analysis
+        System.printf("[2.5/5] Semantic analysis...\n");
+        SemanticAnalyzer semantic = new SemanticAnalyzer();
+        semantic.analyze(combined);
+        Array<SemanticError> semErrors = semantic.getErrors();
+        Array<String> semWarnings = semantic.getWarnings();
+        if (semWarnings.size() > 0) {
+            for (int i = 0; i < semWarnings.size(); i++) {
+                System.printf("  [Warning] %s\n", semWarnings.get(i));
+            }
+        }
+        if (semErrors.size() > 0) {
+            for (int i = 0; i < semErrors.size(); i++) {
+                System.printf("  [Error] %s\n", semErrors.get(i).toString());
+            }
+            System.printf("  Semantic analysis failed with %d errors\n", semErrors.size());
+            return;
+        }
+        System.printf("  Semantic analysis passed");
+        if (semWarnings.size() > 0) {
+            System.printf(" (%d warnings)", semWarnings.size());
+        }
+        System.printf("\n");
+
+        // Phase 3: Code generation
+        System.printf("[3/5] Generating C code...\n");
+        CCodeGen codegen = new CCodeGen();
+        String cCode = codegen.generate(combined);
+
+        // Write output file
+        int writeOk = File.writeAll(outputFile, cCode);
+        if (!writeOk) {
+            System.printf("Error: cannot write to file '%s'\n", outputFile);
+            return;
+        }
+
+        System.printf("  Output written to: %s\n", outputFile);
+        System.printf("Compilation complete!\n");
+    }
+}

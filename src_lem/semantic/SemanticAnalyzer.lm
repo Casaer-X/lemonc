@@ -197,8 +197,7 @@ class SemanticAnalyzer {
             ClassMember member = class_.members.get(i);
             if (member.kind == ClassMemberKind.Field) {
                 VarDecl field = member.field;
-                // Check field type
-                this.checkTypeRef(field.varType);
+                // Type checking deferred to checkMembers phase
                 if (fields.containsKey(field.name)) {
                     this.errors.add(SemanticError.duplicateDefinition(field.name));
                 } else {
@@ -513,6 +512,7 @@ class SemanticAnalyzer {
                 this.checkBlock(member.destructor.body);
             } else if (member.kind == ClassMemberKind.Field) {
                 VarDecl field = member.field;
+                this.checkTypeRef(field.varType);
                 if (field.initializer != null) {
                     this.checkExpr(field.initializer);
                 }

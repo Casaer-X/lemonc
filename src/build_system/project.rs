@@ -1,8 +1,12 @@
 use super::annotation::*;
-use std::collections::HashMap;
+use crate::lexer::lexer::Lexer;
+use crate::parser::parser::Parser;
+use crate::ast::semantic::SemanticAnalyzer;
+use crate::ast::optimizer::AstOptimizer;
+use crate::codegen::c_gen::CCodeGen;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// 项目结构扫描器
 pub struct ProjectScanner;
@@ -90,7 +94,7 @@ impl ProjectScanner {
             structure.libraries.push(path_str.clone());
         }
 
-        if relative_path.contains("test") || relative_path.contains("spec") {
+        if relative_path.contains("test") || relative_path.contains("Test") || relative_path.contains("spec") {
             structure.tests.push(path_str.clone());
         }
 
@@ -228,7 +232,7 @@ impl ProjectBuilder {
         }
     }
 
-    /// 构建整个项目
+    /// 构建整个项目 — 合并所有源文件为一个 Program 后统一编译
     pub fn build_project(&self, root_dir: &str) -> Result<BuildResult, String> {
         println!("Scanning project at '{}'...", root_dir);
         let structure = self.scanner.scan_project(root_dir)?;
@@ -245,16 +249,44 @@ impl ProjectBuilder {
             warnings: Vec::new(),
         };
 
-        // 按依赖顺序编译
+        // 分离测试文件和非测试文件
+        let test_files: HashSet<String> = structure.tests.iter().cloned().collect();
+
+        // 收集非测试源文件，按依赖顺序排列
         let compile_order = self.resolve_compile_order(&structure)?;
 
-        for file_path in compile_order {
-            if let Some(file) = structure.modules.get(&file_path) {
-                println!("\nCompiling: {}", file.relative_path);
-                println!("  Target: {:?}", file.config.target);
-                println!("  Optimize: -O{}", file.config.optimize_level);
+        // === 阶段1：合并所有非测试文件为一个 Program，统一编译 ===
+        let main_files: Vec<String> = compile_order.iter()
+            .filter(|p| !test_files.contains(*p))
+            .cloned()
+            .collect();
 
-                match self.compile_file(file) {
+        if !main_files.is_empty() {
+            println!("\n=== Merging {} source files into one compilation unit ===", main_files.len());
+            match self.compile_merged(&main_files, &structure) {
+                Ok(output) => {
+                    for path in &main_files {
+                        if let Some(file) = structure.modules.get(path) {
+                            result.compiled_files.push(CompiledFile {
+                                source: file.path.clone(),
+                                output: output.clone(),
+                                target: CompileTarget::C,
+                            });
+                        }
+                    }
+                }
+                Err(e) => {
+                    result.errors.push(format!("Merged compilation: {}", e));
+                    result.success = false;
+                }
+            }
+        }
+
+        // === 阶段2：单独编译测试文件（它们可能有特殊的语义错误预期） ===
+        for test_path in &structure.tests {
+            if let Some(file) = structure.modules.get(test_path) {
+                println!("\nCompiling test: {}", file.relative_path);
+                match self.compile_single_file(file) {
                     Ok(output) => {
                         result.compiled_files.push(CompiledFile {
                             source: file.path.clone(),
@@ -263,8 +295,8 @@ impl ProjectBuilder {
                         });
                     }
                     Err(e) => {
-                        result.errors.push(format!("{}: {}", file.relative_path, e));
-                        result.success = false;
+                        // 测试文件编译失败不标记整体失败（测试可能故意包含错误）
+                        result.warnings.push(format!("Test {} compilation: {}", file.relative_path, e));
                     }
                 }
             }
@@ -273,30 +305,150 @@ impl ProjectBuilder {
         Ok(result)
     }
 
-    /// 编译单个文件
-    fn compile_file(&self, file: &SourceFile) -> Result<String, String> {
+    /// 合并多个文件为一个 Program 并编译
+    fn compile_merged(&self, file_paths: &[String], structure: &ProjectStructure) -> Result<String, String> {
+        let mut all_declarations = Vec::new();
+        let mut total_tokens = 0usize;
+        let mut annotation_config = ModuleConfig::default();
+
+        for (file_idx, file_path) in file_paths.iter().enumerate() {
+            let file = structure.modules.get(file_path)
+                .ok_or_else(|| format!("File not found: {}", file_path))?;
+
+            println!("[1/5] Lexical analysis ({}/{})...", file_idx + 1, file_paths.len());
+
+            let lexer = Lexer::new(&file.content);
+            let tokens: Vec<_> = lexer.collect();
+            total_tokens += tokens.len();
+
+            println!("[2/5] Parsing ({}/{})...", file_idx + 1, file_paths.len());
+            let mut parser = Parser::new(tokens);
+            let program = parser.parse();
+
+            if parser.has_errors() {
+                let errors: Vec<String> = parser.errors().iter().map(|e| e.to_string()).collect();
+                return Err(format!("Parse errors in '{}':\n{}", file.relative_path, errors.join("\n")));
+            }
+
+            if file_idx == 0 {
+                annotation_config = file.config.clone();
+            }
+
+            all_declarations.extend(program.declarations);
+        }
+
+        println!("  Tokenized {} tokens (total from {} files)", total_tokens, file_paths.len());
+
+        let mut program = crate::ast::node::Program { declarations: all_declarations };
+        println!("  Parsed {} declarations (total)", program.declarations.len());
+
+        // 语义分析
+        println!("\n[2.5/5] Semantic analysis...");
+        let mut semantic = SemanticAnalyzer::new();
+        let (sem_errors, sem_warnings) = semantic.analyze(&program);
+        for warning in &sem_warnings {
+            println!("  [Warning] {}", warning);
+        }
+        if !sem_errors.is_empty() {
+            let errors: Vec<String> = sem_errors.iter().map(|e| e.to_string()).collect();
+            return Err(format!("Semantic errors:\n{}", errors.join("\n")));
+        }
+        println!("  Semantic analysis passed ({} warnings)", sem_warnings.len());
+
+        // 优化
+        println!("\n[3/5] Optimizing...");
+        let opt_level = annotation_config.optimize_level;
+        if opt_level > 0 {
+            let mut optimizer = AstOptimizer::new();
+            let stats = optimizer.optimize(&mut program);
+            println!("  Constants folded: {}", stats.constants_folded);
+            println!("  Constants propagated: {}", stats.constants_propagated);
+            println!("  Dead code removed: {}", stats.dead_code_removed);
+        }
+
+        // 代码生成
+        println!("\n[4/5] Generating C code...");
+        let mut c_gen = CCodeGen::new();
+        let c_code = c_gen.generate(&program);
+
+        // 收集字符串字面量并插入到生成的 C 代码中
+        let strings = c_gen.string_literals().to_vec();
+        let full_code = if strings.is_empty() {
+            c_code
+        } else {
+            let mut string_defs = String::new();
+            for (i, s) in strings.iter().enumerate() {
+                let escaped = s.replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r")
+                    .replace('\t', "\\t")
+                    .replace('\0', "\\0");
+                string_defs.push_str(&format!("static const char _str_{}[] = \"{}\";\n", i, escaped));
+            }
+            string_defs.push_str("\n");
+
+            // 在第一个 typedef 或 struct 定义之前插入字符串字面量
+            if let Some(pos) = c_code.find("\ntypedef void") {
+                format!("{}{}{}", &c_code[..pos+1], string_defs, &c_code[pos+1..])
+            } else if let Some(pos) = c_code.find("\nstruct ") {
+                format!("{}{}{}", &c_code[..pos+1], string_defs, &c_code[pos+1..])
+            } else {
+                string_defs + &c_code
+            }
+        };
+
+        // 确定输出文件名
+        let output_name = annotation_config.output_name.clone()
+            .unwrap_or_else(|| {
+                // 使用项目目录名作为输出文件名
+                let dir_name = Path::new(&structure.root_dir)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("output");
+                format!("{}.c", dir_name)
+            });
+
+        // 写入输出文件
+        let output_path = if Path::new(&output_name).is_absolute() {
+            output_name.clone()
+        } else {
+            format!("{}/{}", structure.root_dir, output_name)
+        };
+
+        fs::write(&output_path, &full_code)
+            .map_err(|e| format!("Error writing '{}': {}", output_path, e))?;
+
+        println!("  Output written to: {}", output_path);
+        println!("\nCompilation complete!");
+
+        Ok(output_path)
+    }
+
+    /// 编译单个文件（用于测试文件）
+    fn compile_single_file(&self, file: &SourceFile) -> Result<String, String> {
         let output_name = file.config.output_name.clone()
             .unwrap_or_else(|| file.config.target.default_output_name(&file.module_name));
 
         let args = self.build_compiler_args(file, &output_name);
-        
+
         // 获取 lemonc 可执行文件路径
         let lemonc_path = std::env::current_exe()
             .map_err(|e| format!("Failed to get current executable path: {}", e))?;
-        
-        let mut cmd = Command::new(&lemonc_path);
+
+        let mut cmd = std::process::Command::new(&lemonc_path);
         for arg in &args {
             cmd.arg(arg);
         }
-        
+
         let output = cmd.output()
             .map_err(|e| format!("Failed to execute lemonc: {}", e))?;
-        
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(format!("Compilation failed: {}", stderr));
         }
-        
+
         Ok(output_name)
     }
 

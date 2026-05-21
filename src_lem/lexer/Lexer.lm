@@ -47,7 +47,11 @@ class Lexer {
         if (c == '.') { this.advance(); return this.makeToken(TokenKind.Dot, startPos); }
         if (c == ';') { this.advance(); return this.makeToken(TokenKind.Semicolon, startPos); }
         if (c == ':') { this.advance(); return this.makeToken(TokenKind.Colon, startPos); }
-        if (c == '?') { this.advance(); return this.makeToken(TokenKind.Question, startPos); }
+        if (c == '?') {
+            this.advance();
+            if (this.peekChar() == '?') { this.advance(); return this.makeToken(TokenKind.NullCoalesce, startPos); }
+            return this.makeToken(TokenKind.Question, startPos);
+        }
         if (c == '~') { this.advance(); return this.makeToken(TokenKind.Tilde, startPos); }
         if (c == '@') { this.advance(); return this.makeToken(TokenKind.At, startPos); }
 

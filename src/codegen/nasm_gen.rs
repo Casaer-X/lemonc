@@ -705,6 +705,10 @@ impl NasmCodeGen {
                     BinaryOp::BitXor => self.emit_line("    xor rax, rcx"),
                     BinaryOp::Shl => self.emit_line("    shl rax, cl"),
                     BinaryOp::Shr => self.emit_line("    sar rax, cl"),
+                    BinaryOp::NullCoalesce => {
+                        // null coalesce not supported in NASM backend
+                        self.emit_line("    ; NullCoalesce: fallback to left");
+                    }
                 }
             }
             Expr::UnaryOp(op, operand) => {

@@ -172,5 +172,6 @@ pub fn binop_to_bytecode(op: &BinaryOp) -> Bytecode {
         BinaryOp::BitXor => Bytecode::BitXor,
         BinaryOp::Shl => Bytecode::Shl,
         BinaryOp::Shr => Bytecode::Shr,
+        BinaryOp::NullCoalesce => Bytecode::Shr, // fallback: not directly supported
     }
 }

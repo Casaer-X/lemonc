@@ -41,7 +41,15 @@ impl<'a> Lexer<'a> {
             Some('.') => { self.advance(); self.make_token(TokenKind::Dot, start_pos, self.pos) }
             Some(';') => { self.advance(); self.make_token(TokenKind::Semicolon, start_pos, self.pos) }
             Some(':') => { self.advance(); self.make_token(TokenKind::Colon, start_pos, self.pos) }
-            Some('?') => { self.advance(); self.make_token(TokenKind::Question, start_pos, self.pos) }
+            Some('?') => {
+                self.advance();
+                if self.peek_char() == Some('?') {
+                    self.advance();
+                    self.make_token(TokenKind::NullCoalesce, start_pos, self.pos)
+                } else {
+                    self.make_token(TokenKind::Question, start_pos, self.pos)
+                }
+            }
             Some('~') => { self.advance(); self.make_token(TokenKind::Tilde, start_pos, self.pos) }
             Some('@') => { self.advance(); self.make_token(TokenKind::At, start_pos, self.pos) }
 
