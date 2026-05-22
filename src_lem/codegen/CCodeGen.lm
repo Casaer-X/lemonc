@@ -88,15 +88,10 @@ class CCodeGen {
 
     public String generate(Program program) {
         // Phase 1: 收集信息
-        System.printf("[DBG] collectClassFields...\n");
         this.collectClassFields(program);
-        System.printf("[DBG] collectVirtualMethods...\n");
         this.collectVirtualMethods(program);
-        System.printf("[DBG] collectInterfaceInfo...\n");
         this.collectInterfaceInfo(program);
-        System.printf("[DBG] collectMethodSignatures...\n");
         this.collectMethodSignatures(program);
-        System.printf("[DBG] collectEnums...\n");
         this.collectEnums(program);
 
         // Phase 1.5: 预扫描 - 运行实现生成以收集字符串字面量
@@ -124,33 +119,26 @@ class CCodeGen {
         this.stringCounter = 0;  // 重置计数器，正式生成时从0开始编号
 
         // Phase 2: 运行时库
-        System.printf("[DBG] emitRuntimeLibrary...\n");
         this.emitRuntimeLibrary();
 
         // Phase 2.5: 字符串字面量定义（必须在函数实现之前）
-        System.printf("[DBG] emitStringLiterals...\n");
         this.emitStringLiterals();
 
         // Phase 2.6: 静态字段 #define 宏
         this.emitStaticFieldDefines(program);
 
         // Phase 3: 前向声明
-        System.printf("[DBG] emitForwardDeclarations...\n");
         this.emitForwardDeclarations(program);
 
         // Phase 4: Vtable/ITable 实例
-        System.printf("[DBG] emitVtableInstances...\n");
         this.emitVtableInstances(program);
 
         // Phase 5: 实现生成
-        System.printf("[DBG] emitImplementations...\n");
         this.emitImplementations(program);
 
         // Phase 6: Main 入口
-        System.printf("[DBG] emitMain...\n");
         this.emitMain(program);
 
-        System.printf("[DBG] generate done.\n");
         return this.output.toString();
     }
 
@@ -598,6 +586,69 @@ class CCodeGen {
         this.emitLineNoIndent("int32_t String_indexOf(const char* s, const char* sub) {");
         this.emitLineNoIndent("    if (!s || !sub) return -1; const char* p = strstr(s, sub); return p ? (int32_t)(p - s) : -1;");
         this.emitLineNoIndent("}");
+        this.emitLineNoIndent("const char* String_replace(const char* s, const char* old, const char* rep) {");
+        this.emitLineNoIndent("    if (!s || !old || !rep) return s ? strdup(s) : NULL;");
+        this.emitLineNoIndent("    int32_t slen = strlen(s), olen = strlen(old), rlen = strlen(rep);");
+        this.emitLineNoIndent("    int32_t count = 0; const char* p = s;");
+        this.emitLineNoIndent("    while ((p = strstr(p, old))) { count++; p += olen; }");
+        this.emitLineNoIndent("    char* r = (char*)malloc(slen + count * (rlen - olen) + 1);");
+        this.emitLineNoIndent("    char* out = r; p = s;");
+        this.emitLineNoIndent("    while (*p) { if (strncmp(p, old, olen) == 0) { memcpy(out, rep, rlen); out += rlen; p += olen; } else { *out++ = *p++; } }");
+        this.emitLineNoIndent("    *out = 0; return r;");
+        this.emitLineNoIndent("}");
+        this.emitLineNoIndent("const char* String_substring(const char* s, int32_t start, int32_t len) {");
+        this.emitLineNoIndent("    if (!s) return NULL; int32_t slen = strlen(s); if (start < 0) start = 0; if (start > slen) start = slen;");
+        this.emitLineNoIndent("    if (len < 0 || start + len > slen) len = slen - start;");
+        this.emitLineNoIndent("    char* r = (char*)malloc(len + 1); memcpy(r, s + start, len); r[len] = 0; return r;");
+        this.emitLineNoIndent("}");
+        this.emitLineNoIndent("const char* String_substring_from(const char* s, int32_t start) { if (!s) return NULL; return String_substring(s, start, strlen(s) - start); }");
+        this.emitLineNoIndent("const char* String_substring_from_to(const char* s, int32_t start, int32_t end) {");
+        this.emitLineNoIndent("    if (!s) return NULL; int32_t len = strlen(s); if (start < 0) start = 0; if (end > len) end = len; if (start >= end) return strdup(\"\");");
+        this.emitLineNoIndent("    int32_t slen = end - start; char* r = (char*)malloc(slen + 1); memcpy(r, s + start, slen); r[slen] = 0; return r;");
+        this.emitLineNoIndent("}");
+        this.emitLineNoIndent("const char* String_fromChar(char c) { char* r = (char*)malloc(2); r[0] = c; r[1] = 0; return r; }");
+        this.emitLineNoIndent("int32_t String_startsWith(const char* s, const char* prefix) {");
+        this.emitLineNoIndent("    if (!s || !prefix) return 0; return strncmp(s, prefix, strlen(prefix)) == 0;");
+        this.emitLineNoIndent("}");
+        this.emitLineNoIndent("int32_t String_endsWith(const char* s, const char* suffix) {");
+        this.emitLineNoIndent("    if (!s || !suffix) return 0; int32_t slen = strlen(s), suflen = strlen(suffix);");
+        this.emitLineNoIndent("    if (suflen > slen) return 0; return strcmp(s + slen - suflen, suffix) == 0;");
+        this.emitLineNoIndent("}");
+        this.emitLineNoIndent("int32_t String_contains(const char* s, const char* sub) {");
+        this.emitLineNoIndent("    if (!s || !sub) return 0; return strstr(s, sub) != NULL;");
+        this.emitLineNoIndent("}");
+        this.emitLineNoIndent("int32_t String_size(const char* s) { return s ? (int32_t)strlen(s) : 0; }");
+        this.emitLineNoIndent("char String_get(const char* s, int32_t i) { return s ? s[i] : 0; }");
+        // String_join is defined after LemonArray
+        this.emitLineNoIndent("const char* String_escapeCString(const char* s) {");
+        this.emitLineNoIndent("    if (!s) return NULL; int32_t len = strlen(s);");
+        this.emitLineNoIndent("    char* r = (char*)malloc(len * 2 + 1); int32_t j = 0;");
+        this.emitLineNoIndent("    for (int32_t i = 0; i < len; i++) {");
+        this.emitLineNoIndent("        switch (s[i]) { case '\\\\': r[j++] = '\\\\'; r[j++] = '\\\\'; break; case '\"': r[j++] = '\\\\'; r[j++] = '\"'; break;");
+        this.emitLineNoIndent("        case '\\n': r[j++] = '\\\\'; r[j++] = 'n'; break; case '\\r': r[j++] = '\\\\'; r[j++] = 'r'; break;");
+        this.emitLineNoIndent("        case '\\t': r[j++] = '\\\\'; r[j++] = 't'; break; case '\\0': r[j++] = '\\\\'; r[j++] = '0'; break;");
+        this.emitLineNoIndent("        default: r[j++] = s[i]; } }");
+        this.emitLineNoIndent("    r[j] = 0; return r;");
+        this.emitLineNoIndent("}");
+        this.emitLineNoIndent("const char* String_intToHex(int32_t v) { char* buf = (char*)malloc(12); snprintf(buf, 12, \"0x%x\", v); return buf; }");
+        this.emitLineNoIndent("");
+        // Character methods
+        this.emitLineNoIndent("int32_t Character_isDigit(char c) { return c >= '0' && c <= '9'; }");
+        this.emitLineNoIndent("int32_t Character_isLetter(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }");
+        this.emitLineNoIndent("int32_t Character_isLetterOrDigit(char c) { return Character_isLetter(c) || Character_isDigit(c); }");
+        this.emitLineNoIndent("int32_t Character_isWhitespace(char c) { return c == ' ' || c == '\\t' || c == '\\n' || c == '\\r'; }");
+        this.emitLineNoIndent("int32_t Character_isUpperCase(char c) { return c >= 'A' && c <= 'Z'; }");
+        this.emitLineNoIndent("int32_t Character_isLowerCase(char c) { return c >= 'a' && c <= 'z'; }");
+        this.emitLineNoIndent("char Character_toUpperCase(char c) { return (c >= 'a' && c <= 'z') ? c - 32 : c; }");
+        this.emitLineNoIndent("char Character_toLowerCase(char c) { return (c >= 'A' && c <= 'Z') ? c + 32 : c; }");
+        this.emitLineNoIndent("int32_t Character_getNumericValue(char c) { return (c >= '0' && c <= '9') ? c - '0' : -1; }");
+        this.emitLineNoIndent("int32_t Character_isAlpha(char c) { return Character_isLetter(c); }");
+        this.emitLineNoIndent("int32_t Character_isAlphaNumeric(char c) { return Character_isLetterOrDigit(c); }");
+        this.emitLineNoIndent("int32_t Character_isPrintable(char c) { return c >= 32 && c <= 126; }");
+        this.emitLineNoIndent("char Character_fromInt(int32_t v) { return (char)v; }");
+        this.emitLineNoIndent("int32_t Character_toInt(char c) { return (int32_t)c; }");
+        this.emitLineNoIndent("const char* Character_toString(char c) { return String_fromChar(c); }");
+        this.emitLineNoIndent("");
         this.emitLineNoIndent("const char* File_readAll(const char* path) {");
         this.emitLineNoIndent("    FILE* f = fopen(path, \"rb\"); if (!f) return NULL;");
         this.emitLineNoIndent("    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);");
@@ -636,6 +687,11 @@ class CCodeGen {
         this.emitLineNoIndent("    LemonFile* f = (LemonFile*)malloc(sizeof(LemonFile)); f->handle = fopen(path, mode); return f;");
         this.emitLineNoIndent("}");
         this.emitLineNoIndent("void File_close(LemonFile* f) { if (f && f->handle) { fclose(f->handle); f->handle = NULL; } }");
+        this.emitLineNoIndent("int32_t File_writeAll(const char* path, const char* content) {");
+        this.emitLineNoIndent("    if (!path || !content) return 0;");
+        this.emitLineNoIndent("    FILE* f = fopen(path, \"w\"); if (!f) return 0;");
+        this.emitLineNoIndent("    fputs(content, f); fclose(f); return 1;");
+        this.emitLineNoIndent("}");
         this.emitLineNoIndent("");
 
         // LemonArray
@@ -663,6 +719,16 @@ class CCodeGen {
         this.emitLineNoIndent("    for (int32_t j = i; j < arr->length - 1; j++) arr->data[j] = arr->data[j+1];");
         this.emitLineNoIndent("    arr->length--;");
         this.emitLineNoIndent("}");
+        this.emitLineNoIndent("const char* String_join(LemonArray* arr, const char* sep) {");
+        this.emitLineNoIndent("    if (!arr || arr->length == 0) return strdup(\"\");");
+        this.emitLineNoIndent("    int32_t seplen = sep ? strlen(sep) : 0; int32_t total = 0;");
+        this.emitLineNoIndent("    for (int32_t i = 0; i < arr->length; i++) { const char* s = (const char*)arr->data[i]; total += s ? strlen(s) : 4; if (i > 0) total += seplen; }");
+        this.emitLineNoIndent("    char* r = (char*)malloc(total + 1); r[0] = 0; int32_t pos = 0;");
+        this.emitLineNoIndent("    for (int32_t i = 0; i < arr->length; i++) { const char* s = (const char*)arr->data[i]; if (!s) s = \"null\";");
+        this.emitLineNoIndent("        if (i > 0 && seplen > 0) { memcpy(r + pos, sep, seplen); pos += seplen; }");
+        this.emitLineNoIndent("        int32_t slen = strlen(s); memcpy(r + pos, s, slen); pos += slen; }");
+        this.emitLineNoIndent("    r[pos] = 0; return r;");
+        this.emitLineNoIndent("}");
         this.emitLineNoIndent("");
 
         // LemonMap
@@ -677,14 +743,25 @@ class CCodeGen {
         this.emitLineNoIndent("    m->entries = (LemonMapEntry*)calloc(m->capacity, sizeof(LemonMapEntry)); return m;");
         this.emitLineNoIndent("}");
         this.emitLineNoIndent("void LemonMap_put(LemonMap* map, const char* key, void* value) {");
-        this.emitLineNoIndent("    if (!map) return; uint32_t idx = _map_hash(key) % map->capacity;");
+        this.emitLineNoIndent("    if (!map) return;");
+        this.emitLineNoIndent("    if (map->size * 4 >= map->capacity * 3) {");
+        this.emitLineNoIndent("        int32_t oldCap = map->capacity; LemonMapEntry* oldEntries = map->entries;");
+        this.emitLineNoIndent("        map->capacity = oldCap * 2; map->entries = (LemonMapEntry*)calloc(map->capacity, sizeof(LemonMapEntry)); map->size = 0;");
+        this.emitLineNoIndent("        for (int32_t ri = 0; ri < oldCap; ri++) {");
+        this.emitLineNoIndent("            if (oldEntries[ri].occupied) { LemonMap_put(map, oldEntries[ri].key, oldEntries[ri].value); free(oldEntries[ri].key); }");
+        this.emitLineNoIndent("        }");
+        this.emitLineNoIndent("        free(oldEntries);");
+        this.emitLineNoIndent("    }");
+        this.emitLineNoIndent("    uint32_t idx = _map_hash(key) % map->capacity;");
         this.emitLineNoIndent("    for (int32_t i = 0; i < map->capacity; i++) {");
         this.emitLineNoIndent("        if (map->entries[idx].occupied && strcmp(map->entries[idx].key, key) == 0) {");
         this.emitLineNoIndent("            map->entries[idx].value = value; return;");
         this.emitLineNoIndent("        }");
+        this.emitLineNoIndent("        if (!map->entries[idx].occupied) {");
+        this.emitLineNoIndent("            map->entries[idx].key = strdup(key); map->entries[idx].value = value; map->entries[idx].occupied = 1; map->size++; return;");
+        this.emitLineNoIndent("        }");
         this.emitLineNoIndent("        idx = (idx + 1) % map->capacity;");
         this.emitLineNoIndent("    }");
-        this.emitLineNoIndent("    map->entries[idx].key = strdup(key); map->entries[idx].value = value; map->entries[idx].occupied = 1; map->size++;");
         this.emitLineNoIndent("}");
         this.emitLineNoIndent("void* LemonMap_get(LemonMap* map, const char* key) {");
         this.emitLineNoIndent("    if (!map) return NULL; uint32_t idx = _map_hash(key) % map->capacity;");
@@ -709,6 +786,14 @@ class CCodeGen {
         this.emitLineNoIndent("    }");
         this.emitLineNoIndent("}");
         // LemonMap_keys is defined in the Rust runtime library, not here
+        this.emitLineNoIndent("LemonArray* LemonMap_keys(LemonMap* map) {");
+        this.emitLineNoIndent("    if (!map) return LemonArray_new(sizeof(void*));");
+        this.emitLineNoIndent("    LemonArray* arr = LemonArray_new(sizeof(void*));");
+        this.emitLineNoIndent("    for (int32_t i = 0; i < map->capacity; i++) {");
+        this.emitLineNoIndent("        if (map->entries[i].occupied && map->entries[i].key) LemonArray_add(arr, map->entries[i].key);");
+        this.emitLineNoIndent("    }");
+        this.emitLineNoIndent("    return arr;");
+        this.emitLineNoIndent("}");
         this.emitLineNoIndent("LemonArray* LemonMap_values(LemonMap* map) {");
         this.emitLineNoIndent("    if (!map) return LemonArray_new(sizeof(void*));");
         this.emitLineNoIndent("    LemonArray* arr = LemonArray_new(sizeof(void*));");
@@ -790,28 +875,75 @@ class CCodeGen {
             Declaration decl = program.declarations.get(i);
             if (decl.kind == DeclKind.Class) {
                 ClassDecl class_ = decl.classDecl;
-                // Constructor
-                this.emitLineNoIndent(class_.name + "* " + class_.name + "_ctor(" + class_.name + "* self);");
-                // Methods
+                // Check if there's an explicit constructor
+                bool hasExplicitCtor = false;
+                for (int ci = 0; ci < class_.members.size(); ci++) {
+                    ClassMember cm = class_.members.get(ci);
+                    if (cm.kind == ClassMemberKind.Constructor) {
+                        hasExplicitCtor = true;
+                        break;
+                    }
+                    if (cm.kind == ClassMemberKind.Method && String.equals(cm.method.name, class_.name)) {
+                        hasExplicitCtor = true;
+                        break;
+                    }
+                }
+                if (!hasExplicitCtor) {
+                    // Default constructor forward declaration
+                    this.emitLineNoIndent(class_.name + "* " + class_.name + "_ctor(" + class_.name + "* self);");
+                }
+                // Methods and constructors
                 for (int mi = 0; mi < class_.members.size(); mi++) {
                     ClassMember member = class_.members.get(mi);
-                    if (member.kind == ClassMemberKind.Method) {
-                        MethodDecl method = member.method;
-                        String retType = this.ct(method.returnType);
+                    if (member.kind == ClassMemberKind.Constructor) {
+                        ConstructorDecl ctor = member.constructor;
                         // Pre-extract param info
                         Array<String> fwdParamCtypes = new Array<String>();
                         Array<String> fwdParamNames = new Array<String>();
-                        for (int pi = 0; pi < method.params.size(); pi++) {
-                            Param p = method.params.get(pi);
+                        for (int pi = 0; pi < ctor.params.size(); pi++) {
+                            Param p = ctor.params.get(pi);
                             fwdParamCtypes.add(this.ct(p.paramType));
                             fwdParamNames.add(p.name);
                         }
-                        String sig = retType + " " + class_.name + "_" + method.name + "(" + class_.name + "* self";
+                        String sig = class_.name + "* " + class_.name + "_ctor(" + class_.name + "* self";
                         for (int pi = 0; pi < fwdParamCtypes.size(); pi++) {
                             sig = sig + ", " + fwdParamCtypes.get(pi) + " " + fwdParamNames.get(pi);
                         }
                         sig = sig + ");";
                         this.emitLineNoIndent(sig);
+                    } else if (member.kind == ClassMemberKind.Method) {
+                        MethodDecl method = member.method;
+                        // If method name matches class name, treat as constructor
+                        if (String.equals(method.name, class_.name)) {
+                            Array<String> fwdParamCtypes = new Array<String>();
+                            Array<String> fwdParamNames = new Array<String>();
+                            for (int pi = 0; pi < method.params.size(); pi++) {
+                                Param p = method.params.get(pi);
+                                fwdParamCtypes.add(this.ct(p.paramType));
+                                fwdParamNames.add(p.name);
+                            }
+                            String sig = class_.name + "* " + class_.name + "_ctor(" + class_.name + "* self";
+                            for (int pi = 0; pi < fwdParamCtypes.size(); pi++) {
+                                sig = sig + ", " + fwdParamCtypes.get(pi) + " " + fwdParamNames.get(pi);
+                            }
+                            sig = sig + ");";
+                            this.emitLineNoIndent(sig);
+                        } else {
+                            String retType = this.ct(method.returnType);
+                            Array<String> fwdParamCtypes = new Array<String>();
+                            Array<String> fwdParamNames = new Array<String>();
+                            for (int pi = 0; pi < method.params.size(); pi++) {
+                                Param p = method.params.get(pi);
+                                fwdParamCtypes.add(this.ct(p.paramType));
+                                fwdParamNames.add(p.name);
+                            }
+                            String sig = retType + " " + class_.name + "_" + method.name + "(" + class_.name + "* self";
+                            for (int pi = 0; pi < fwdParamCtypes.size(); pi++) {
+                                sig = sig + ", " + fwdParamCtypes.get(pi) + " " + fwdParamNames.get(pi);
+                            }
+                            sig = sig + ");";
+                            this.emitLineNoIndent(sig);
+                        }
                     }
                 }
             } else if (decl.kind == DeclKind.Function) {
@@ -1024,10 +1156,8 @@ class CCodeGen {
         for (int i = 0; i < program.declarations.size(); i++) {
             Declaration decl = program.declarations.get(i);
             if (decl.kind == DeclKind.Class) {
-                System.printf("[DBG] emitClass: %s\n", decl.classDecl.name);
                 this.emitClass(decl.classDecl);
             } else if (decl.kind == DeclKind.Function) {
-                System.printf("[DBG] emitFunction: %s\n", decl.functionDecl.name);
                 this.emitFunction(decl.functionDecl);
             }
         }
@@ -1046,7 +1176,6 @@ class CCodeGen {
         // Populate varTypes with field types
         this.varTypes = new Map<String, String>();
         Array<String> fields = this.classFields.get(class_.name);
-        System.printf("[DBG] emitClass: varTypes setup, fields=%s\n", fields == null ? "null" : "ok");
         if (fields != null) {
             for (int fi = 0; fi < fields.size(); fi = fi + 2) {
                 String ftype = fields.get(fi);
@@ -1055,21 +1184,35 @@ class CCodeGen {
             }
         }
 
-        // Default constructor
-        System.printf("[DBG] emitClass: emitDefaultCtor...\n");
-        this.emitDefaultCtor(class_);
-        System.printf("[DBG] emitClass: emitDefaultCtor done\n");
+        // Default constructor - only if no explicit constructor exists
+        bool hasExplicitCtor = false;
+        for (int ci = 0; ci < class_.members.size(); ci++) {
+            ClassMember cm = class_.members.get(ci);
+            if (cm.kind == ClassMemberKind.Constructor) {
+                hasExplicitCtor = true;
+                break;
+            }
+            if (cm.kind == ClassMemberKind.Method && String.equals(cm.method.name, class_.name)) {
+                hasExplicitCtor = true;
+                break;
+            }
+        }
+        if (!hasExplicitCtor) {
+            this.emitDefaultCtor(class_);
+        }
 
         // Members
-        System.printf("[DBG] emitClass: members count=%d\n", class_.members.size());
         for (int mi = 0; mi < class_.members.size(); mi++) {
             ClassMember member = class_.members.get(mi);
-            System.printf("[DBG] emitClass: member[%d] kind=%d\n", mi, member.kind);
             if (member.kind == ClassMemberKind.Constructor) {
                 this.emitConstructor(class_, member.constructor);
             } else if (member.kind == ClassMemberKind.Method) {
-                System.printf("[DBG] emitClass: emitMethod %s\n", member.method.name);
-                this.emitMethod(class_, member.method);
+                // If method name matches class name, treat as constructor
+                if (String.equals(member.method.name, class_.name)) {
+                    this.emitCtorMethod(class_, member.method);
+                } else {
+                    this.emitMethod(class_, member.method);
+                }
             } else if (member.kind == ClassMemberKind.Destructor) {
                 this.emitDestructor(class_, member.destructor);
             }
@@ -1099,6 +1242,18 @@ class CCodeGen {
     // ---- 构造函数 ----
 
     private void emitConstructor(ClassDecl class_, ConstructorDecl ctor) {
+        // Save and restore varTypes to avoid parameter name pollution across methods
+        Map<String, String> savedVarTypes = this.varTypes;
+        this.varTypes = new Map<String, String>();
+        // Re-populate with field types
+        Array<String> fields = this.classFields.get(class_.name);
+        if (fields != null) {
+            for (int fi = 0; fi < fields.size(); fi = fi + 2) {
+                String ftype = fields.get(fi);
+                String fname = fields.get(fi + 1);
+                this.varTypes.put(fname, ftype);
+            }
+        }
         // Pre-extract param info to avoid void* dereference in generated C code
         Array<String> paramCtypes = new Array<String>();
         Array<String> paramNames = new Array<String>();
@@ -1108,7 +1263,7 @@ class CCodeGen {
             paramNames.add(p.name);
         }
 
-        String sig = class_.name + "* " + class_.name + "_ctor_" + class_.name + "(" + class_.name + "* self";
+        String sig = class_.name + "* " + class_.name + "_ctor(" + class_.name + "* self";
         for (int pi = 0; pi < paramCtypes.size(); pi++) {
             sig = sig + ", " + paramCtypes.get(pi) + " " + paramNames.get(pi);
         }
@@ -1131,30 +1286,90 @@ class CCodeGen {
         this.decreaseIndent();
         this.emitLineNoIndent("}");
         this.emitLineNoIndent("");
+        // Restore varTypes
+        this.varTypes = savedVarTypes;
+    }
+
+    // ---- 构造函数方法（方法名与类名相同） ----
+
+    private void emitCtorMethod(ClassDecl class_, MethodDecl method) {
+        // Save and restore varTypes to avoid parameter name pollution across methods
+        Map<String, String> savedVarTypes = this.varTypes;
+        this.varTypes = new Map<String, String>();
+        // Re-populate with field types
+        Array<String> fields = this.classFields.get(class_.name);
+        if (fields != null) {
+            for (int fi = 0; fi < fields.size(); fi = fi + 2) {
+                String ftype = fields.get(fi);
+                String fname = fields.get(fi + 1);
+                this.varTypes.put(fname, ftype);
+            }
+        }
+        // Build signature: ClassName* ClassName_ctor(ClassName* self, params...)
+        String sig = class_.name + "* " + class_.name + "_ctor(" + class_.name + "* self";
+        Array<String> paramCtypes = new Array<String>();
+        Array<String> paramNames = new Array<String>();
+        for (int pi = 0; pi < method.params.size(); pi++) {
+            Param p = method.params.get(pi);
+            String pct = this.ct(p.paramType);
+            paramCtypes.add(pct);
+            paramNames.add(p.name);
+            sig = sig + ", " + pct + " " + p.name;
+        }
+        sig = sig + ") {";
+        this.emitLineNoIndent(sig);
+        this.increaseIndent();
+        // Populate varTypes with params
+        for (int pi = 0; pi < paramCtypes.size(); pi++) {
+            this.varTypes.put(paramNames.get(pi), paramCtypes.get(pi));
+        }
+        // Call parent constructor
+        if (this.parentClass != null) {
+            this.emitLine(this.parentClass + "_ctor((" + this.parentClass + "*)self);");
+        }
+        // Initialize vtable
+        this.emitVtableInit(class_);
+        // Body
+        if (method.body != null) {
+            this.emitBlock(method.body);
+        }
+        this.emitLine("return self;");
+        this.decreaseIndent();
+        this.emitLineNoIndent("}");
+        this.emitLineNoIndent("");
+        // Restore varTypes
+        this.varTypes = savedVarTypes;
     }
 
     // ---- 方法生成 ----
 
     private void emitMethod(ClassDecl class_, MethodDecl method) {
-        System.printf("[DBG] emitMethod: start %s.%s\n", class_.name, method.name);
+        // Save and restore varTypes to avoid parameter name pollution across methods
+        Map<String, String> savedVarTypes = this.varTypes;
+        this.varTypes = new Map<String, String>();
+        // Re-populate with field types
+        Array<String> fields = this.classFields.get(class_.name);
+        if (fields != null) {
+            for (int fi = 0; fi < fields.size(); fi = fi + 2) {
+                String ftype = fields.get(fi);
+                String fname = fields.get(fi + 1);
+                this.varTypes.put(fname, ftype);
+            }
+        }
         String retType = this.ct(method.returnType);
-        System.printf("[DBG] emitMethod: retType=%s\n", retType);
         // Pre-extract param info to avoid void* dereference in generated C code
         Array<String> paramCtypes = new Array<String>();
         Array<String> paramNames = new Array<String>();
-        System.printf("[DBG] emitMethod: params count=%d\n", method.params == null ? -1 : method.params.size());
         for (int pi = 0; pi < method.params.size(); pi++) {
             Param p = method.params.get(pi);
             paramCtypes.add(this.ct(p.paramType));
             paramNames.add(p.name);
         }
-        System.printf("[DBG] emitMethod: building sig...\n");
         String sig = retType + " " + class_.name + "_" + method.name + "(" + class_.name + "* self";
         for (int pi = 0; pi < paramCtypes.size(); pi++) {
             sig = sig + ", " + paramCtypes.get(pi) + " " + paramNames.get(pi);
         }
         sig = sig + ") {";
-        System.printf("[DBG] emitMethod: emitting sig...\n");
         this.emitLineNoIndent(sig);
         this.increaseIndent();
         // Populate varTypes with params
@@ -1162,15 +1377,14 @@ class CCodeGen {
             this.varTypes.put(paramNames.get(pi), paramCtypes.get(pi));
         }
         // Body
-        System.printf("[DBG] emitMethod: body null=%s\n", method.body == null ? "yes" : "no");
         if (method.body != null) {
-            System.printf("[DBG] emitMethod: emitBlock...\n");
             this.emitBlock(method.body);
         }
         this.decreaseIndent();
         this.emitLineNoIndent("}");
         this.emitLineNoIndent("");
-        System.printf("[DBG] emitMethod: done\n");
+        // Restore varTypes
+        this.varTypes = savedVarTypes;
     }
 
     // ---- 析构函数 ----
@@ -1252,7 +1466,11 @@ class CCodeGen {
         }
         if (mainClass != null) {
             this.emitLineNoIndent("int main(int argc, char** argv) {");
-            this.emitLineNoIndent("    " + mainClass + "_main(NULL, argv);");
+            this.emitLineNoIndent("    LemonArray* _args = LemonArray_new(sizeof(const char*));");
+            this.emitLineNoIndent("    for (int _ai = 1; _ai < argc; _ai++) {");
+            this.emitLineNoIndent("        LemonArray_add(_args, (void*)argv[_ai]);");
+            this.emitLineNoIndent("    }");
+            this.emitLineNoIndent("    " + mainClass + "_main(NULL, _args);");
             this.emitLineNoIndent("    return 0;");
             this.emitLineNoIndent("}");
         }
@@ -1309,19 +1527,19 @@ class CCodeGen {
             this.decreaseIndent();
             this.emitLine("}");
         } else if (stmt.kind == StmtKind.For) {
-            // For loop: init; cond; update
-            this.emitLine("{");
-            this.increaseIndent();
-            if (stmt.init != null) this.emitStmt(stmt.init);
+            // For loop: translate to C for loop so continue works correctly
+            String initStr = "int32_t _for_init = 0;";
+            if (stmt.init != null) {
+                initStr = this.genStmtAsExpr(stmt.init);
+            }
             String cond = stmt.forCond != null ? this.genExpr(stmt.forCond) : "1";
-            this.emitLine("while (" + cond + ") {");
+            String updateStr = "";
+            if (stmt.update != null) {
+                updateStr = this.genExpr(stmt.update);
+            }
+            this.emitLine("for (" + initStr + "; " + cond + "; " + updateStr + ") {");
             this.increaseIndent();
             this.emitStmt(stmt.body);
-            if (stmt.update != null) {
-                this.emitLine(this.genExpr(stmt.update) + ";");
-            }
-            this.decreaseIndent();
-            this.emitLine("}");
             this.decreaseIndent();
             this.emitLine("}");
         } else if (stmt.kind == StmtKind.Block) {
@@ -1343,6 +1561,7 @@ class CCodeGen {
             this.increaseIndent();
             String elemType = this.ct(stmt.forEachType);
             this.emitLine(elemType + " " + stmt.forEachVarName + " = (" + elemType + ")LemonArray_get((LemonArray*)" + iter + ", _fe_i);");
+            this.varTypes.put(stmt.forEachVarName, elemType);
             this.emitStmt(stmt.body);
             this.decreaseIndent();
             this.emitLine("}");
@@ -1409,6 +1628,22 @@ class CCodeGen {
 
     // ---- 表达式生成 ----
 
+    // Generate a statement as a C expression string (for for-loop init)
+    private String genStmtAsExpr(Stmt stmt) {
+        if (stmt.kind == StmtKind.VarDecl) {
+            String ctype = this.ct(stmt.varDecl.varType);
+            String init = "0";
+            if (stmt.varDecl.initializer != null) {
+                init = this.genExpr(stmt.varDecl.initializer);
+            }
+            return ctype + " " + stmt.varDecl.name + " = " + init;
+        }
+        if (stmt.kind == StmtKind.Expr) {
+            return this.genExpr(stmt.expr);
+        }
+        return "int32_t _for_init = 0";
+    }
+
     private String genExpr(Expr expr) {
         if (expr == null) return "NULL";
 
@@ -1444,7 +1679,118 @@ class CCodeGen {
             return s + ".0";
         }
         if (expr.kind == ExprKind.StringLiteral) return this.freshStringLiteral(expr.strValue);
-        if (expr.kind == ExprKind.CharLiteral) return "'" + expr.strValue + "'";
+        if (expr.kind == ExprKind.CharLiteral) {
+            char ch = expr.charValue;
+            if (ch == '\0') return "'\\0'";
+            if (ch == '\n') return "'\\n'";
+            if (ch == '\r') return "'\\r'";
+            if (ch == '\t') return "'\\t'";
+            if (ch == '\\') return "'\\\\'";
+            if (ch == '\'') return "'\\''";
+            // For specific common characters, return hardcoded C char literals
+            if (ch == '(') return "'('";
+            if (ch == ')') return "')'";
+            if (ch == '{') return "'{'";
+            if (ch == '}') return "'}'";
+            if (ch == '[') return "'['";
+            if (ch == ']') return "']'";
+            if (ch == ',') return "','";
+            if (ch == '.') return "'.'";
+            if (ch == ';') return "';'";
+            if (ch == ':') return "':'";
+            if (ch == '?') return "'?'";
+            if (ch == '~') return "'~'";
+            if (ch == '@') return "'@'";
+            if (ch == '+') return "'+'";
+            if (ch == '-') return "'-'";
+            if (ch == '*') return "'*'";
+            if (ch == '/') return "'/'";
+            if (ch == '%') return "'%'";
+            if (ch == '&') return "'&'";
+            if (ch == '|') return "'|'";
+            if (ch == '^') return "'^'";
+            if (ch == '<') return "'<'";
+            if (ch == '>') return "'>'";
+            if (ch == '=') return "'='";
+            if (ch == '!') return "'!'";
+            if (ch == ' ') return "' '";
+            if (ch == '"') return "'\"'";
+            if (ch == '0') return "'0'";
+            if (ch == '1') return "'1'";
+            if (ch == '2') return "'2'";
+            if (ch == '3') return "'3'";
+            if (ch == '4') return "'4'";
+            if (ch == '5') return "'5'";
+            if (ch == '6') return "'6'";
+            if (ch == '7') return "'7'";
+            if (ch == '8') return "'8'";
+            if (ch == '9') return "'9'";
+            if (ch == 'a') return "'a'";
+            if (ch == 'b') return "'b'";
+            if (ch == 'c') return "'c'";
+            if (ch == 'd') return "'d'";
+            if (ch == 'e') return "'e'";
+            if (ch == 'f') return "'f'";
+            if (ch == 'g') return "'g'";
+            if (ch == 'h') return "'h'";
+            if (ch == 'i') return "'i'";
+            if (ch == 'j') return "'j'";
+            if (ch == 'k') return "'k'";
+            if (ch == 'l') return "'l'";
+            if (ch == 'm') return "'m'";
+            if (ch == 'n') return "'n'";
+            if (ch == 'o') return "'o'";
+            if (ch == 'p') return "'p'";
+            if (ch == 'q') return "'q'";
+            if (ch == 'r') return "'r'";
+            if (ch == 's') return "'s'";
+            if (ch == 't') return "'t'";
+            if (ch == 'u') return "'u'";
+            if (ch == 'v') return "'v'";
+            if (ch == 'w') return "'w'";
+            if (ch == 'x') return "'x'";
+            if (ch == 'y') return "'y'";
+            if (ch == 'z') return "'z'";
+            if (ch == 'A') return "'A'";
+            if (ch == 'B') return "'B'";
+            if (ch == 'C') return "'C'";
+            if (ch == 'D') return "'D'";
+            if (ch == 'E') return "'E'";
+            if (ch == 'F') return "'F'";
+            if (ch == 'G') return "'G'";
+            if (ch == 'H') return "'H'";
+            if (ch == 'I') return "'I'";
+            if (ch == 'J') return "'J'";
+            if (ch == 'K') return "'K'";
+            if (ch == 'L') return "'L'";
+            if (ch == 'M') return "'M'";
+            if (ch == 'N') return "'N'";
+            if (ch == 'O') return "'O'";
+            if (ch == 'P') return "'P'";
+            if (ch == 'Q') return "'Q'";
+            if (ch == 'R') return "'R'";
+            if (ch == 'S') return "'S'";
+            if (ch == 'T') return "'T'";
+            if (ch == 'U') return "'U'";
+            if (ch == 'V') return "'V'";
+            if (ch == 'W') return "'W'";
+            if (ch == 'X') return "'X'";
+            if (ch == 'Y') return "'Y'";
+            if (ch == 'Z') return "'Z'";
+            if (ch == '_') return "'_'";
+            // For other printable/non-printable chars, use octal escape
+            int v = (int)ch;
+            int d1 = v / 64;
+            int d2 = (v % 64) / 8;
+            int d3 = v % 8;
+            // Build octal escape string manually
+            String octal = "'\\";
+            octal = octal + (char)('0' + d1);
+            octal = octal + (char)('0' + d2);
+            octal = octal + (char)('0' + d3);
+            octal = octal + "'";
+            return octal;
+        }
         if (expr.kind == ExprKind.BoolLiteral) return expr.boolValue ? "1" : "0";
         if (expr.kind == ExprKind.Null) return "NULL";
         if (expr.kind == ExprKind.This) return "self";
@@ -1463,7 +1809,7 @@ class CCodeGen {
                 return "((" + left + ") != NULL ? (" + left + ") : (" + right + "))";
             }
             // String concatenation
-            if (opStr.equals("+") && this.exprIsStringType(expr.left)) {
+            if (expr.opValue == BinaryOp.Add && this.exprIsStringType(expr.left)) {
                 return this.genStringConcat(expr.left, expr.right);
             }
             String left = this.genExpr(expr.left);
@@ -1557,10 +1903,9 @@ class CCodeGen {
         for (int ai = 0; ai < expr.args.size(); ai++) {
             args = args + ", " + this.genExpr(expr.args.get(ai));
         }
-        // If there are constructor arguments, use the named constructor (ClassName_ClassName)
-        // Otherwise use the default constructor (ClassName_ctor)
+        // Use ClassName_ctor for all constructors (with or without args)
         if (expr.args.size() > 0) {
-            return className + "_" + className + "((" + className + "*)malloc(sizeof(" + className + ")), " + args.substring(6) + ")";
+            return className + "_ctor((" + className + "*)malloc(sizeof(" + className + ")), " + args.substring(6) + ")";
         }
         return className + "_ctor((" + className + "*)malloc(sizeof(" + className + ")))";
     }
@@ -1614,6 +1959,29 @@ class CCodeGen {
             }
         }
         String objStr = this.genExpr(expr.receiver);
+        // If receiver is an array access (LemonArray_get returns void*), cast to the inferred class type
+        if (expr.receiver.kind == ExprKind.ArrayAccess) {
+            String elemClass = this.inferClassFromExpr(expr.receiver);
+            if (elemClass != null && !elemClass.equals("LemonArray") && !elemClass.equals("LemonMap")) {
+                return "((" + elemClass + "*)" + objStr + ")->" + field;
+            }
+        }
+        // If receiver is a method call that returns void* (e.g., LemonArray_get), cast to inferred type
+        if (expr.receiver.kind == ExprKind.MethodCall) {
+            String elemClass = this.inferClassFromExpr(expr.receiver);
+            if (elemClass != null && !elemClass.equals("LemonArray") && !elemClass.equals("LemonMap")
+                && !elemClass.equals("String")) {
+                return "((" + elemClass + "*)" + objStr + ")->" + field;
+            }
+        }
+        // If receiver is a Call expression that returns void* (e.g., LemonArray_get via genCallExpr), cast to inferred type
+        if (expr.receiver.kind == ExprKind.Call) {
+            String elemClass = this.inferClassFromExpr(expr.receiver);
+            if (elemClass != null && !elemClass.equals("LemonArray") && !elemClass.equals("LemonMap")
+                && !elemClass.equals("String")) {
+                return "((" + elemClass + "*)" + objStr + ")->" + field;
+            }
+        }
         return objStr + "->" + field;
     }
 
@@ -1719,6 +2087,22 @@ class CCodeGen {
                 return this.genBuiltinTypeMethodCall("File", method, args);
             }
 
+            // Static method call on a class: ClassName.method(args)
+            bool isClassName = false;
+            for (int ci = 0; ci < this.classNames.size(); ci++) {
+                if (String.equals(this.classNames.get(ci), varName)) {
+                    isClassName = true;
+                    break;
+                }
+            }
+            if (isClassName) {
+                String argsInner = "NULL";
+                for (int ai = 0; ai < args.size(); ai++) {
+                    argsInner = argsInner + ", " + this.genExpr(args.get(ai));
+                }
+                return varName + "_" + method + "(" + argsInner + ")";
+            }
+
             // Check if variable is a known type
             String varType = this.varTypes.get(varName);
             if (varType != null) {
@@ -1767,6 +2151,11 @@ class CCodeGen {
         // Generic method call
         String objStr = this.genExpr(obj);
         String inferredClass = this.inferClassFromExpr(obj);
+        // Check if the object expression has a string C type (field access on a class with const char* field)
+        String objCType = this.inferTypeFromExpr(obj);
+        if (inferredClass == null && objCType != null && this.isStringCType(objCType)) {
+            inferredClass = "String";
+        }
         if (inferredClass != null) {
             // Handle LemonArray/LemonMap method calls with int arg wrapping
             if (inferredClass.equals("LemonArray") || inferredClass.equals("LemonMap")) {
@@ -1891,6 +2280,7 @@ class CCodeGen {
         }
         // Convert non-string to string
         String type = this.inferTypeFromExpr(expr);
+        if (type.equals("const char*") || type.equals("char*")) return this.genExpr(expr);
         if (type.equals("int32_t")) return "String_intToString(" + this.genExpr(expr) + ")";
         if (type.equals("int64_t")) return "String_longToString(" + this.genExpr(expr) + ")";
         if (type.equals("double")) return "String_doubleToString(" + this.genExpr(expr) + ")";
@@ -1906,6 +2296,11 @@ class CCodeGen {
             String field = expr.strValue;
             String varType = this.varTypes.get(field);
             if (varType != null && this.isStringCType(varType)) {
+                return true;
+            }
+            // Check inferred type from field access
+            String inferredType = this.inferTypeFromExpr(expr);
+            if (inferredType != null && this.isStringCType(inferredType)) {
                 return true;
             }
         }
@@ -1949,11 +2344,30 @@ class CCodeGen {
                     return true;
                 }
             }
+            // Direct function call returning string: String_concat, String_intToString, etc.
+            if (expr.callee != null && expr.callee.kind == ExprKind.Variable) {
+                String funcName = expr.callee.strValue;
+                if (funcName.startsWith("String_") || funcName.startsWith("StringBuilder_")
+                    || funcName.startsWith("TokenKind_") || funcName.startsWith("Character_")) {
+                    // String_concat, String_intToString, etc. return const char*
+                    if (funcName.equals("String_concat") || funcName.equals("String_intToString")
+                        || funcName.equals("String_longToString") || funcName.equals("String_doubleToString")
+                        || funcName.equals("String_fromChar") || funcName.equals("String_fromCharArray")
+                        || funcName.equals("String_join") || funcName.equals("String_substring")
+                        || funcName.equals("String_substring_from") || funcName.equals("String_substring_from_to")
+                        || funcName.equals("String_toUpperCase") || funcName.equals("String_toLowerCase")
+                        || funcName.equals("String_trim") || funcName.equals("String_replace")
+                        || funcName.equals("String_escapeCString") || funcName.equals("String_intToHex")
+                        || funcName.equals("TokenKind_toString") || funcName.equals("Character_toString")) {
+                        return true;
+                    }
+                }
+            }
         }
         if (expr.kind == ExprKind.BinaryOp) {
             // String concatenation with + : if left is string type, result is string
-            if (expr.strValue.equals("+")) {
-                return this.exprIsStringType(expr.left);
+            if (expr.opValue == BinaryOp.Add && this.exprIsStringType(expr.left)) {
+                return true;
             }
         }
         return false;
@@ -1978,27 +2392,73 @@ class CCodeGen {
                 return "const char*";
             }
         }
+        // Check field access: self->tokens, method->params, etc.
+        if (expr.receiver.kind == ExprKind.FieldAccess) {
+            String objClass = this.inferClassFromExpr(expr.receiver.receiver);
+            String fieldName = expr.receiver.strValue;
+            if (objClass != null) {
+                String fieldCType = this.lookupFieldType(objClass, fieldName);
+                if (fieldCType != null && fieldCType.equals("LemonArray*")) {
+                    // Try to infer element type from field name conventions
+                    // tokens -> Token*, params -> ParamDecl*, methods -> MethodDecl*, etc.
+                    String elemType = this.inferArrayElementTypeFromFieldName(fieldName);
+                    if (elemType != null) return elemType;
+                    return "void*";
+                }
+            }
+        }
+        return null;
+    }
+
+    // Infer array element type from field name conventions
+    private String inferArrayElementTypeFromFieldName(String fieldName) {
+        if (fieldName.equals("tokens")) return "Token*";
+        if (fieldName.equals("params") || fieldName.equals("parameters")) return "Param*";
+        if (fieldName.equals("methods")) return "MethodDecl*";
+        if (fieldName.equals("members")) return "ClassMember*";
+        if (fieldName.equals("fields")) return "VarDecl*";
+        if (fieldName.equals("variants")) return "EnumVariant*";
+        if (fieldName.equals("declarations") || fieldName.equals("decls")) return "Declaration*";
+        if (fieldName.equals("errors") || fieldName.equals("warnings") || fieldName.equals("semErrors") || fieldName.equals("semWarnings")) return "SemanticError*";
+        if (fieldName.equals("args") || fieldName.equals("arguments")) return "Expr*";
+        if (fieldName.equals("interfaces")) return "InterfaceDecl*";
+        if (fieldName.equals("entries")) return "VirtualMethodEntry*";
+        if (fieldName.equals("interfaceMethods")) return "InterfaceMethodEntry*";
+        if (fieldName.equals("statements") || fieldName.equals("stmts")) return "Stmt*";
+        if (fieldName.equals("cases")) return "MatchCase*";
+        if (fieldName.equals("constructors")) return "ConstructorDecl*";
+        if (fieldName.equals("stringLiterals")) return "const char*";
+        if (fieldName.equals("classNames")) return "const char*";
+        if (fieldName.equals("paramTypes") || fieldName.equals("paramNames") || fieldName.equals("paramCtypes")) return "const char*";
+        if (fieldName.equals("fwdParamCtypes") || fieldName.equals("fwdParamNames")) return "const char*";
         return null;
     }
 
     private String inferClassFromExpr(Expr expr) {
+        if (expr.kind == ExprKind.This) {
+            return this.currentClass;
+        }
         if (expr.kind == ExprKind.Variable) {
             String varType = this.varTypes.get(expr.strValue);
-            if (varType != null && varType.endsWith("*")) {
-                return varType.substring(0, varType.length() - 1);
+            if (varType != null) {
+                if (this.isStringCType(varType)) return "String";
+                if (varType.endsWith("*")) {
+                    return varType.substring(0, varType.length() - 1);
+                }
+            }
+        }
+        if (expr.kind == ExprKind.ArrayAccess) {
+            String elemType = this.inferArrayAccessElementType(expr);
+            if (elemType != null && elemType.endsWith("*")) {
+                return elemType.substring(0, elemType.length() - 1);
             }
         }
         if (expr.kind == ExprKind.FieldAccess) {
             String field = expr.strValue;
-            // Check local variable types first
-            String varType = this.varTypes.get(field);
-            if (varType != null && varType.endsWith("*")) {
-                return varType.substring(0, varType.length() - 1);
-            }
-            // Check field type on the receiver's class using method signatures
+            // Check field type on the receiver's class first (more reliable than varTypes)
             String objClass = this.inferClassFromExpr(expr.receiver);
             if (objClass != null) {
-                // Look up field type from methodSignatures-style lookup
+                // Look up field type from class field map
                 String fieldCType = this.lookupFieldType(objClass, field);
                 if (fieldCType != null) {
                     if (fieldCType.equals("const char*")) {
@@ -2007,6 +2467,14 @@ class CCodeGen {
                     if (fieldCType.endsWith("*")) {
                         return fieldCType.substring(0, fieldCType.length() - 1);
                     }
+                }
+            }
+            // Fallback: check local variable types
+            String varType = this.varTypes.get(field);
+            if (varType != null) {
+                if (this.isStringCType(varType)) return "String";
+                if (varType.endsWith("*")) {
+                    return varType.substring(0, varType.length() - 1);
                 }
             }
         }
@@ -2025,6 +2493,28 @@ class CCodeGen {
                     || method.equals("freshExcVar") || method.equals("freshMatchVar")) {
                     return "String";
                 }
+                // Array.get() returns element type - infer from receiver
+                if (method.equals("get")) {
+                    String objClass = this.inferClassFromExpr(expr.callee.receiver);
+                    if (objClass != null && objClass.equals("LemonArray")) {
+                        if (expr.callee.receiver.kind == ExprKind.FieldAccess) {
+                            String fieldName = expr.callee.receiver.strValue;
+                            String elemType = this.inferArrayElementTypeFromFieldName(fieldName);
+                            if (elemType != null && elemType.endsWith("*")) {
+                                return elemType.substring(0, elemType.length() - 1);
+                            }
+                        }
+                        if (expr.callee.receiver.kind == ExprKind.Variable) {
+                            String varName = expr.callee.receiver.strValue;
+                            if (varName.equals("args")) return "String";
+                            // Try to infer element type from variable name
+                            String elemType = this.inferArrayElementTypeFromFieldName(varName);
+                            if (elemType != null && elemType.endsWith("*")) {
+                                return elemType.substring(0, elemType.length() - 1);
+                            }
+                        }
+                    }
+                }
             }
         }
         if (expr.kind == ExprKind.MethodCall) {
@@ -2040,10 +2530,36 @@ class CCodeGen {
                 || method.equals("freshExcVar") || method.equals("freshMatchVar")) {
                 return "String";
             }
+            // Array.get() returns element type - infer from receiver
+            if (method.equals("get")) {
+                String objClass = this.inferClassFromExpr(expr.receiver);
+                if (objClass != null && objClass.equals("LemonArray")) {
+                    // Try to infer element type from the field name
+                    if (expr.receiver.kind == ExprKind.FieldAccess) {
+                        String fieldName = expr.receiver.strValue;
+                        String elemType = this.inferArrayElementTypeFromFieldName(fieldName);
+                        if (elemType != null && elemType.endsWith("*")) {
+                            return elemType.substring(0, elemType.length() - 1);
+                        }
+                    }
+                    if (expr.receiver.kind == ExprKind.Variable) {
+                        String varName = expr.receiver.strValue;
+                        if (varName.equals("args")) return "String";
+                        // Try to infer element type from variable name
+                        String elemType = this.inferArrayElementTypeFromFieldName(varName);
+                        if (elemType != null) {
+                            if (elemType.equals("const char*")) return "String";
+                            if (elemType.endsWith("*")) {
+                                return elemType.substring(0, elemType.length() - 1);
+                            }
+                        }
+                    }
+                }
+            }
         }
         if (expr.kind == ExprKind.BinaryOp) {
             // String concatenation with + returns String
-            if (expr.strValue.equals("+") && this.exprIsStringType(expr.left)) {
+            if (expr.opValue == BinaryOp.Add && this.exprIsStringType(expr.left)) {
                 return "String";
             }
         }
@@ -2084,7 +2600,7 @@ class CCodeGen {
             }
         }
         if (expr.kind == ExprKind.BinaryOp) {
-            if (expr.strValue.equals("+") && this.exprIsStringType(expr.left)) {
+            if (expr.opValue == BinaryOp.Add && this.exprIsStringType(expr.left)) {
                 return "const char*";
             }
         }

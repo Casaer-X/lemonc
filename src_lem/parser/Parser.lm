@@ -10,6 +10,7 @@ class Parser {
     public Array<Token> tokens;
     public int pos;
     public Array<String> errors;
+    public String currentClassName;
 
     public Parser(Array<Token> tokens) {
         this.tokens = tokens;
@@ -250,6 +251,7 @@ class Parser {
         if (nameTok != null) {
             name = nameTok.strValue;
         }
+        this.currentClassName = name;
 
         Array<TypeParam> typeParams = new Array<TypeParam>();
         if (this.peekKind() == TokenKind.Lt) {
@@ -561,12 +563,26 @@ class Parser {
         Token nameTok = this.advance();
         String name = nameTok.strValue;
 
-        if (name == "this") {
+        if (String.equals(name, "this")) {
             this.expect(TokenKind.LeftParen);
             Array<Param> params = this.parseParams();
             this.expect(TokenKind.RightParen);
             Block body = this.parseBlock();
             return ClassMember.makeConstructor(new ConstructorDecl("this", params, body));
+        }
+
+        // If name matches the current class name, treat as constructor
+        if (String.equals(name, this.currentClassName)) {
+            this.expect(TokenKind.LeftParen);
+            Array<Param> params = this.parseParams();
+            this.expect(TokenKind.RightParen);
+            Block body = null;
+            if (this.peekKind() == TokenKind.LeftBrace) {
+                body = this.parseBlock();
+            } else {
+                this.expect(TokenKind.Semicolon);
+            }
+            return ClassMember.makeConstructor(new ConstructorDecl(name, params, body));
         }
 
         if (this.peekKind() == TokenKind.LeftParen) {

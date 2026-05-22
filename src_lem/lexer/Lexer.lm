@@ -247,6 +247,7 @@ class Lexer {
                 if (esc == 'n') { sb.appendChar('\n'); this.advance(); }
                 else if (esc == 't') { sb.appendChar('\t'); this.advance(); }
                 else if (esc == 'r') { sb.appendChar('\r'); this.advance(); }
+                else if (esc == '0') { sb.appendChar('\0'); this.advance(); }
                 else if (esc == '\\') { sb.appendChar('\\'); this.advance(); }
                 else if (esc == '"') { sb.appendChar('"'); this.advance(); }
                 else { sb.appendChar(esc); this.advance(); }
@@ -268,6 +269,7 @@ class Lexer {
             if (esc == 'n') { value = '\n'; this.advance(); }
             else if (esc == 't') { value = '\t'; this.advance(); }
             else if (esc == 'r') { value = '\r'; this.advance(); }
+            else if (esc == '0') { value = '\0'; this.advance(); }
             else if (esc == '\\') { value = '\\'; this.advance(); }
             else if (esc == '\'') { value = '\''; this.advance(); }
             else { value = esc; this.advance(); }
