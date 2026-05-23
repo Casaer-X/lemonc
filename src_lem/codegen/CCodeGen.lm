@@ -56,6 +56,8 @@ class CCodeGen {
     private int matchCounter;
     private Array<String> classNames;
     private Map<String, String> varMapValueTypes;           // varName → C value type for Map variables
+    private Map<String, Map<String, String> > classFieldElementTypeMap;  // className → (fieldName → elementCType)
+    private Map<String, String> localVarElementTypes;       // varName → elementCType for local Array<T> vars
 
     public CCodeGen() {
         this.output = new StringBuilder();
@@ -78,6 +80,8 @@ class CCodeGen {
         this.matchCounter = 0;
         this.classNames = new Array<String>();
         this.varMapValueTypes = new Map<String, String>();
+        this.classFieldElementTypeMap = new Map<String, Map<String, String> >();
+        this.localVarElementTypes = new Map<String, String>();
     }
 
     // ---- 主入口 ----
@@ -367,6 +371,7 @@ class CCodeGen {
                 Array<String> fields = new Array<String>();
                 Array<String> fieldTypes = new Array<String>();
                 Map<String, String> fieldTypeMap = new Map<String, String>();
+                Map<String, String> elemTypeMap = new Map<String, String>();
                 for (int mi = 0; mi < class_.members.size(); mi++) {
                     ClassMember member = class_.members.get(mi);
                     if (member.kind == ClassMemberKind.Field) {
@@ -376,11 +381,17 @@ class CCodeGen {
                         fields.add(field.name);
                         fieldTypes.add(ct);
                         fieldTypeMap.put(field.name, ct);
+                        // Collect element type for Array<T> fields
+                        if (field.varType != null && field.varType.kind == TypeRefKind.Array && field.varType.elementType != null) {
+                            String elemCType = this.ct(field.varType.elementType);
+                            elemTypeMap.put(field.name, elemCType);
+                        }
                     }
                 }
                 this.classFields.put(class_.name, fields);
                 this.classFieldTypes.put(class_.name, fieldTypes);
                 this.classFieldTypeMap.put(class_.name, fieldTypeMap);
+                this.classFieldElementTypeMap.put(class_.name, elemTypeMap);
             }
         }
     }
@@ -1270,9 +1281,13 @@ class CCodeGen {
         sig = sig + ") {";
         this.emitLineNoIndent(sig);
         this.increaseIndent();
-        // Populate varTypes with params
+        // Populate varTypes with params and collect element types for Array<T> params
         for (int pi = 0; pi < paramCtypes.size(); pi++) {
             this.varTypes.put(paramNames.get(pi), paramCtypes.get(pi));
+            Param p = ctor.params.get(pi);
+            if (p.paramType != null && p.paramType.kind == TypeRefKind.Array && p.paramType.elementType != null) {
+                this.localVarElementTypes.put(paramNames.get(pi), this.ct(p.paramType.elementType));
+            }
         }
         // Call parent constructor
         if (this.parentClass != null) {
@@ -1319,9 +1334,13 @@ class CCodeGen {
         sig = sig + ") {";
         this.emitLineNoIndent(sig);
         this.increaseIndent();
-        // Populate varTypes with params
+        // Populate varTypes with params and collect element types for Array<T> params
         for (int pi = 0; pi < paramCtypes.size(); pi++) {
             this.varTypes.put(paramNames.get(pi), paramCtypes.get(pi));
+            Param p2 = method.params.get(pi);
+            if (p2.paramType != null && p2.paramType.kind == TypeRefKind.Array && p2.paramType.elementType != null) {
+                this.localVarElementTypes.put(paramNames.get(pi), this.ct(p2.paramType.elementType));
+            }
         }
         // Call parent constructor
         if (this.parentClass != null) {
@@ -1372,9 +1391,13 @@ class CCodeGen {
         sig = sig + ") {";
         this.emitLineNoIndent(sig);
         this.increaseIndent();
-        // Populate varTypes with params
+        // Populate varTypes with params and collect element types for Array<T> params
         for (int pi = 0; pi < paramCtypes.size(); pi++) {
             this.varTypes.put(paramNames.get(pi), paramCtypes.get(pi));
+            Param p = method.params.get(pi);
+            if (p.paramType != null && p.paramType.kind == TypeRefKind.Array && p.paramType.elementType != null) {
+                this.localVarElementTypes.put(paramNames.get(pi), this.ct(p.paramType.elementType));
+            }
         }
         // Body
         if (method.body != null) {
@@ -1421,6 +1444,10 @@ class CCodeGen {
         this.varTypes = new Map<String, String>();
         for (int pi = 0; pi < paramCtypes.size(); pi++) {
             this.varTypes.put(paramNames.get(pi), paramCtypes.get(pi));
+            Param p = func.params.get(pi);
+            if (p.paramType != null && p.paramType.kind == TypeRefKind.Array && p.paramType.elementType != null) {
+                this.localVarElementTypes.put(paramNames.get(pi), this.ct(p.paramType.elementType));
+            }
         }
         this.emitBlock(func.body);
         this.decreaseIndent();
@@ -1493,6 +1520,10 @@ class CCodeGen {
             }
             this.emitLine(ct + " " + stmt.varDecl.name + init + ";");
             this.varTypes.put(stmt.varDecl.name, ct);
+            // Track Array element type for type inference
+            if (stmt.varDecl.varType != null && stmt.varDecl.varType.kind == TypeRefKind.Array && stmt.varDecl.varType.elementType != null) {
+                this.localVarElementTypes.put(stmt.varDecl.name, this.ct(stmt.varDecl.varType.elementType));
+            }
             // Track Map value type for boxing/unboxing
             if (ct.equals("LemonMap*") && stmt.varDecl.varType != null && stmt.varDecl.varType.kind == TypeRefKind.Named) {
                 String mapValueType = this.extractMapValueType(stmt.varDecl.varType);
@@ -2410,8 +2441,29 @@ class CCodeGen {
         return null;
     }
 
-    // Infer array element type from field name conventions
+    // Infer array element type from field name or variable name
+    // First checks collected type info from AST, then falls back to hardcoded conventions
     private String inferArrayElementTypeFromFieldName(String fieldName) {
+        // 1. Check local variable element types (method params, local vars)
+        String localElemType = this.localVarElementTypes.get(fieldName);
+        if (localElemType != null) return localElemType;
+        // 2. Check class field element types for current class
+        if (this.currentClass != null) {
+            Map<String, String> elemMap = this.classFieldElementTypeMap.get(this.currentClass);
+            if (elemMap != null) {
+                String elemType = elemMap.get(fieldName);
+                if (elemType != null) return elemType;
+            }
+        }
+        // 3. Check all classes (for cross-class field access)
+        for (int ci = 0; ci < this.classNames.size(); ci++) {
+            Map<String, String> elemMap = this.classFieldElementTypeMap.get(this.classNames.get(ci));
+            if (elemMap != null) {
+                String elemType = elemMap.get(fieldName);
+                if (elemType != null) return elemType;
+            }
+        }
+        // 4. Fallback: hardcoded conventions for backward compatibility
         if (fieldName.equals("tokens")) return "Token*";
         if (fieldName.equals("params") || fieldName.equals("parameters")) return "Param*";
         if (fieldName.equals("methods")) return "MethodDecl*";
