@@ -467,6 +467,7 @@ impl ProjectBuilder {
             CompileTarget::Native => "native",
             CompileTarget::Bytecode => "bytecode",
             CompileTarget::Library => "c",
+            CompileTarget::Hybrid => "hybrid",
         };
 
         args.push("--target".to_string());

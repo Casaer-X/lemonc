@@ -7,3 +7,4 @@ pub mod jit;
 pub mod diagnostics;
 pub mod build_system;
 pub mod linker;
+pub mod runtime;

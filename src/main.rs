@@ -151,6 +151,7 @@ fn main() {
             CompileTarget::Native => "native",
             CompileTarget::Bytecode => "bytecode",
             CompileTarget::Library => "c",
+            CompileTarget::Hybrid => "hybrid",
         }.to_string()
     } else {
         target
@@ -209,6 +210,45 @@ fn main() {
         link_native_exe(&obj_path, &output_file, &os, keep_intermediate);
 
         println!("\nCompilation complete!");
+        return;
+    }
+
+    if effective_target == "hybrid" {
+        println!("\n[5/5] Generating hybrid AOT+JIT executable...");
+
+        // Step 1: Compile bytecode for JIT functions
+        let mut bc_compiler = BytecodeCompiler::new();
+        let module = bc_compiler.compile(&program);
+        println!("  Bytecode functions: {}", module.functions.len());
+        println!("  Bytecode classes: {}", module.classes.len());
+
+        // Step 2: Serialize bytecode to bytes
+        let mut lmb_bytes = Vec::new();
+        if let Err(e) = jit::write_module(&mut lmb_bytes, &module) {
+            eprintln!("Error serializing bytecode: {}", e);
+            std::process::exit(1);
+        }
+        println!("  Bytecode size: {} bytes", lmb_bytes.len());
+
+        // Step 3: Generate native code
+        let mut native_gen = NativeCodeGen::new();
+        let coff_bytes = native_gen.generate(&program);
+
+        // Step 4: Write object file
+        let os = detect_os();
+        let obj_path = format!("{}.obj", primary_input.trim_end_matches(".lm"));
+        match fs::write(&obj_path, &coff_bytes) {
+            Ok(_) => println!("  Object file written to: {}", obj_path),
+            Err(e) => {
+                eprintln!("Error writing object file: {}", e);
+                std::process::exit(1);
+            }
+        }
+
+        // Step 5: Link with embedded .lmb data
+        link_hybrid_exe(&obj_path, &output_file, &os, &lmb_bytes, keep_intermediate);
+
+        println!("\nCompilation complete! (hybrid AOT+JIT)");
         return;
     }
 
@@ -613,6 +653,52 @@ fn link_native_exe(obj_path: &str, exe_path: &str, os: &OsInfo, keep: bool) {
     link_native_exe_external(obj_path, exe_path, os, keep);
 }
 
+fn link_hybrid_exe(obj_path: &str, exe_path: &str, os: &OsInfo, lmb_data: &[u8], keep: bool) {
+    println!("\n[6/6] Linking hybrid AOT+JIT executable...");
+
+    if os.name == "windows" {
+        if let Ok(obj_data) = fs::read(obj_path) {
+            let mut pe_linker = linker::PeLinker::new();
+            match pe_linker.add_object(&obj_data) {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("  Built-in linker parse error: {}, trying external linker...", e);
+                    link_native_exe_external(obj_path, exe_path, os, keep);
+                    return;
+                }
+            }
+
+            // Embed .lmb bytecode data as a PE section
+            pe_linker.add_embedded_lmb(lmb_data);
+            println!("  Embedded .lmb bytecode: {} bytes", lmb_data.len());
+
+            match pe_linker.build_pe() {
+                Ok(pe_data) => {
+                    match fs::write(exe_path, &pe_data) {
+                        Ok(_) => {
+                            println!("  Linked with built-in PE linker (hybrid mode)");
+                            println!("  Executable written to: {}", exe_path);
+                            if !keep {
+                                let _ = fs::remove_file(obj_path);
+                            }
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("  Built-in linker write error: {}, trying external linker...", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  Built-in linker error: {}, trying external linker...", e);
+                }
+            }
+        }
+    }
+
+    // Fallback: link without embedded bytecode
+    link_native_exe_external(obj_path, exe_path, os, keep);
+}
+
 fn link_native_exe_external(obj_path: &str, exe_path: &str, os: &OsInfo, keep: bool) {
     let linker = find_linker(os);
     let mut cmd = Command::new(&linker);
@@ -729,6 +815,10 @@ fn get_output_file(args: &[String], input: &str, target: &str, annotation_output
         }
         "nasm" => format!("{}.asm", base),
         "bytecode" | "jit" => format!("{}.lmb", base),
+        "hybrid" => {
+            let os = detect_os();
+            format!("{}{}", base, os.exe_ext)
+        }
         _ => format!("{}.c", base),
     }
 }
@@ -761,7 +851,7 @@ fn print_usage() {
     eprintln!("  --lex-only      Only run lexer");
     eprintln!("  --dump-tokens   Dump all tokens and exit");
     eprintln!("  --parse-only    Only run lexer + parser");
-    eprintln!("  --target <tgt>  Target: c, nasm, exe, native, bytecode");
+    eprintln!("  --target <tgt>  Target: c, nasm, exe, native, bytecode, hybrid");
     eprintln!("  --keep-intermediate  Keep intermediate files (.c/.asm)");
     eprintln!("");
     eprintln!("Source Annotations (auto-detect target):");

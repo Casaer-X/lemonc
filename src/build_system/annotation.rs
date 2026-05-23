@@ -10,6 +10,7 @@ pub enum CompileTarget {
     Native,
     Bytecode,
     Library,
+    Hybrid,
 }
 
 impl CompileTarget {
@@ -21,6 +22,7 @@ impl CompileTarget {
             "native" => Some(CompileTarget::Native),
             "bytecode" | "lmb" => Some(CompileTarget::Bytecode),
             "lib" | "library" => Some(CompileTarget::Library),
+            "hybrid" => Some(CompileTarget::Hybrid),
             _ => None,
         }
     }
@@ -32,7 +34,8 @@ impl CompileTarget {
             CompileTarget::Exe => ".exe",
             CompileTarget::Native => ".exe",
             CompileTarget::Bytecode => ".lmb",
-            CompileTarget::Library => ".lib",
+            CompileTarget::Library => ".a",
+            CompileTarget::Hybrid => ".exe",
         }
     }
 
