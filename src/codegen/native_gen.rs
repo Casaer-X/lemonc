@@ -19,6 +19,8 @@ pub struct NativeCodeGen {
     data_sym_offsets: Vec<(String, u32)>,
     relocs: Vec<(u32, String)>,
     debug_mode: bool,
+    break_label: Option<String>,
+    continue_label: Option<String>,
 }
 
 impl NativeCodeGen {
@@ -41,6 +43,8 @@ impl NativeCodeGen {
             data_sym_offsets: Vec::new(),
             relocs: Vec::new(),
             debug_mode: false,
+            break_label: None,
+            continue_label: None,
         }
     }
 
@@ -454,6 +458,10 @@ impl NativeCodeGen {
             Stmt::While(cond, body) => {
                 let start = self.new_label();
                 let end = self.new_label();
+                let prev_break = self.break_label.take();
+                let prev_continue = self.continue_label.take();
+                self.break_label = Some(end.clone());
+                self.continue_label = Some(start.clone());
                 self.set_label(&start);
                 self.expr_rax(cond);
                 self.emit_test_rax();
@@ -461,10 +469,17 @@ impl NativeCodeGen {
                 self.gen_stmt(body);
                 self.emit_jmp(&start);
                 self.set_label(&end);
+                self.break_label = prev_break;
+                self.continue_label = prev_continue;
             }
             Stmt::For(init, cond, update, body) => {
                 let start = self.new_label();
                 let end = self.new_label();
+                let cont = self.new_label();
+                let prev_break = self.break_label.take();
+                let prev_continue = self.continue_label.take();
+                self.break_label = Some(end.clone());
+                self.continue_label = Some(cont.clone());
                 if let Some(stmt) = init { self.gen_stmt(stmt.as_ref()); }
                 self.set_label(&start);
                 if let Some(e) = cond {
@@ -473,16 +488,74 @@ impl NativeCodeGen {
                     self.emit_jz(&end);
                 }
                 self.gen_stmt(body);
+                self.set_label(&cont);
                 if let Some(e) = update { self.expr_rax(e); }
                 self.emit_jmp(&start);
                 self.set_label(&end);
+                self.break_label = prev_break;
+                self.continue_label = prev_continue;
             }
             Stmt::Block(block) => {
                 for s in &block.statements { self.gen_stmt(s); }
             }
-            Stmt::Break | Stmt::Continue => {}
-            Stmt::Switch(_subject, _cases, _default_body) => {
-                self.emit(&[0x48, 0x31, 0xC0]);
+            Stmt::Break => {
+                // Jump to the nearest loop end label
+                // We use label naming convention: loop_end_{id}
+                if let Some(end_label) = self.break_label.clone() {
+                    self.emit_jmp(&end_label);
+                }
+            }
+            Stmt::Continue => {
+                // Jump to the nearest loop start label
+                if let Some(start_label) = self.continue_label.clone() {
+                    self.emit_jmp(&start_label);
+                }
+            }
+            Stmt::Switch(subject, cases, default_body) => {
+                self.expr_rax(subject);
+                // Push subject for comparison
+                self.emit(&[0x50]); // push rax
+                let end_label = self.new_label();
+                let mut case_labels = Vec::new();
+                for _ in cases {
+                    case_labels.push(self.new_label());
+                }
+
+                for (i, case) in cases.iter().enumerate() {
+                    for pattern in &case.patterns {
+                        // Pop subject, compare, push back if not equal
+                        self.emit(&[0x58]); // pop rax (subject)
+                        self.emit(&[0x50]); // push rax (save)
+                        self.expr_rax(pattern);
+                        // rax = pattern, compare with subject
+                        self.emit(&[0x59]); // pop rcx (subject)
+                        self.emit(&[0x48, 0x39, 0xC1]); // cmp rcx, rax
+                        self.emit(&[0x0F, 0x84]); // je
+                        self.emit_rel32(0);
+                        let patch_off = self.text.len() as u32 - 4;
+                        // We need to patch this to jump to case_labels[i]
+                        // For simplicity, store the label offset
+                        self.relocs.push((patch_off, format!("_switch_case_{}", i)));
+                        self.emit(&[0x50]); // push rcx back (subject for next comparison)
+                    }
+                }
+
+                // Default case
+                self.emit(&[0x58]); // pop rax (discard subject)
+                if let Some(default) = default_body {
+                    for s in &default.statements { self.gen_stmt(s); }
+                }
+                self.emit_jmp(&end_label);
+
+                // Case bodies
+                for (i, case) in cases.iter().enumerate() {
+                    self.set_label(&format!("_switch_case_{}", i));
+                    self.emit(&[0x58]); // pop rax (discard subject)
+                    for s in &case.body.statements { self.gen_stmt(s); }
+                    // Fall through (no automatic break)
+                }
+
+                self.set_label(&end_label);
             }
             Stmt::ForEach(_elem_type, _name, iterable, body) => {
                 let start = self.new_label();
@@ -506,7 +579,13 @@ impl NativeCodeGen {
     fn expr_rax(&mut self, expr: &Expr) {
         match expr {
             Expr::IntegerLiteral(v) => self.emit_mov_rax_imm(*v as u64),
-            Expr::FloatLiteral(_) => self.emit(&[0x48, 0x31, 0xC0]),
+            Expr::FloatLiteral(v) => {
+                // Load float constant: store bits as u64, use mov rax, imm64
+                let bits = v.to_bits();
+                self.emit_mov_rax_imm(bits);
+                // movq xmm0, rax
+                self.emit(&[0x66, 0x48, 0x0F, 0x6E, 0xC0]);
+            }
             Expr::StringLiteral(s) => {
                 let idx = self.string_counter;
                 self.string_counter += 1;
@@ -535,6 +614,19 @@ impl NativeCodeGen {
                 }
             }
             Expr::BinaryOp(op, left, right) => {
+                // NullCoalesce needs short-circuit evaluation
+                if matches!(op, BinaryOp::NullCoalesce) {
+                    let not_null = self.new_label();
+                    let end = self.new_label();
+                    self.expr_rax(left);
+                    self.emit(&[0x48, 0x85, 0xC0]); // test rax, rax
+                    self.emit_jnz(&not_null);
+                    self.expr_rax(right);
+                    self.emit_jmp(&end);
+                    self.set_label(&not_null);
+                    self.set_label(&end);
+                    return;
+                }
                 self.expr_rax(left);
                 self.emit(&[0x50]); // push rax
                 self.expr_rax(right);
@@ -571,22 +663,91 @@ impl NativeCodeGen {
                     BinaryOp::Shl => self.emit(&[0x48, 0xD3, 0xE0]),
                     BinaryOp::Shr => self.emit(&[0x48, 0xD3, 0xF8]),
                     BinaryOp::NullCoalesce => {
-                        // null coalesce not supported in native backend
+                        // Handled above with short-circuit evaluation
                     }
                 }
             }
             Expr::UnaryOp(op, operand) => {
-                self.expr_rax(operand);
                 match op {
-                    UnaryOp::Minus => self.emit(&[0x48, 0xF7, 0xD8]),
-                    UnaryOp::Not => {
-                        self.emit(&[0x48, 0x85, 0xC0]);
-                        self.emit(&[0x0F, 0x94, 0xC0]);
-                        self.emit(&[0x48, 0x0F, 0xB6, 0xC0]);
+                    UnaryOp::Plus => self.expr_rax(operand),
+                    UnaryOp::AddressOf => self.expr_rax(operand), // already a reference
+                    UnaryOp::PreInc => {
+                        if let Expr::Variable(name) = operand.as_ref() {
+                            let off = self.var_stack.get(name).map(|(o, _)| *o);
+                            if let Some(off) = off {
+                                self.emit_mov_rax_rbp_off(off);
+                                self.emit(&[0x48, 0xFF, 0xC0]); // inc rax
+                                self.emit_mov_rbp_off_rax(off);
+                            }
+                        } else if let Expr::FieldAccess(obj, field) = operand.as_ref() {
+                            let cn = self.infer_class(obj);
+                            let foff = cn.as_ref().and_then(|c| self.foff(c, field));
+                            self.expr_rax(obj);
+                            if let Some(foff) = foff {
+                                self.emit(&[0x50]); // push obj
+                                self.emit_mov_rax_off_rax(foff);
+                                self.emit(&[0x48, 0xFF, 0xC0]); // inc rax
+                                self.emit(&[0x59]); // pop rcx (obj)
+                                self.emit_mov_rax_off_rcx(foff);
+                            }
+                        } else {
+                            self.expr_rax(operand);
+                        }
                     }
-                    UnaryOp::BitNot => self.emit(&[0x48, 0xF7, 0xD0]),
-                    UnaryOp::Deref => self.emit(&[0x48, 0x8B, 0x00]),
-                    _ => {}
+                    UnaryOp::PreDec => {
+                        if let Expr::Variable(name) = operand.as_ref() {
+                            let off = self.var_stack.get(name).map(|(o, _)| *o);
+                            if let Some(off) = off {
+                                self.emit_mov_rax_rbp_off(off);
+                                self.emit(&[0x48, 0xFF, 0xC8]); // dec rax
+                                self.emit_mov_rbp_off_rax(off);
+                            }
+                        } else {
+                            self.expr_rax(operand);
+                        }
+                    }
+                    UnaryOp::PostInc => {
+                        if let Expr::Variable(name) = operand.as_ref() {
+                            let off = self.var_stack.get(name).map(|(o, _)| *o);
+                            if let Some(off) = off {
+                                self.emit_mov_rax_rbp_off(off);
+                                self.emit(&[0x50]); // push old value
+                                self.emit(&[0x48, 0xFF, 0xC0]); // inc rax
+                                self.emit_mov_rbp_off_rax(off);
+                                self.emit(&[0x58]); // pop old value to rax
+                            }
+                        } else {
+                            self.expr_rax(operand);
+                        }
+                    }
+                    UnaryOp::PostDec => {
+                        if let Expr::Variable(name) = operand.as_ref() {
+                            let off = self.var_stack.get(name).map(|(o, _)| *o);
+                            if let Some(off) = off {
+                                self.emit_mov_rax_rbp_off(off);
+                                self.emit(&[0x50]);
+                                self.emit(&[0x48, 0xFF, 0xC8]); // dec rax
+                                self.emit_mov_rbp_off_rax(off);
+                                self.emit(&[0x58]);
+                            }
+                        } else {
+                            self.expr_rax(operand);
+                        }
+                    }
+                    _ => {
+                        self.expr_rax(operand);
+                        match op {
+                            UnaryOp::Minus => self.emit(&[0x48, 0xF7, 0xD8]),
+                            UnaryOp::Not => {
+                                self.emit(&[0x48, 0x85, 0xC0]);
+                                self.emit(&[0x0F, 0x94, 0xC0]);
+                                self.emit(&[0x48, 0x0F, 0xB6, 0xC0]);
+                            }
+                            UnaryOp::BitNot => self.emit(&[0x48, 0xF7, 0xD0]),
+                            UnaryOp::Deref => self.emit(&[0x48, 0x8B, 0x00]),
+                            _ => {}
+                        }
+                    }
                 }
             }
             Expr::Ternary(cond, then, else_) => {
@@ -832,8 +993,23 @@ impl NativeCodeGen {
             }
             Expr::Cast(_, inner) => self.expr_rax(inner),
             Expr::InstanceOf(_, _) => self.emit_mov_rax_imm(1),
-            Expr::Sizeof(_) => self.emit_mov_rax_imm(8),
-            Expr::TypeId(_) | Expr::ArrayAccess(_, _) | Expr::Lambda(_, _) | Expr::Throw(_) | Expr::Match(_, _) => {
+            Expr::Sizeof(ty) => {
+                let size = self.tsize(ty);
+                self.emit_mov_rax_imm(size as u64);
+            }
+            Expr::ArrayAccess(arr, idx) => {
+                // Evaluate array expression, then index, then load element
+                self.expr_rax(arr);
+                self.emit(&[0x50]); // push arr
+                self.expr_rax(idx);
+                // rax = index, need arr
+                self.emit(&[0x59]); // pop rcx = arr
+                // arr is a LemonArray*: [length, data...]
+                // Load element at index: mov rax, [rcx + rax*8 + 16]
+                self.emit(&[0x48, 0x8B, 0x44, 0xC1, 0x10]); // mov rax, [rcx + rax*8 + 16]
+            }
+            Expr::TypeId(_) => self.emit_mov_rax_imm(0),
+            Expr::Lambda(_, _) | Expr::Throw(_) | Expr::Match(_, _) => {
                 self.emit(&[0x48, 0x31, 0xC0]);
             }
         }
@@ -1044,6 +1220,13 @@ impl NativeCodeGen {
 
     fn emit_jz(&mut self, label: &str) {
         self.emit(&[0x0F, 0x84]);
+        let off = self.text.len() as u32;
+        self.emit_rel32(0);
+        self.relocs.push((off, label.to_string()));
+    }
+
+    fn emit_jnz(&mut self, label: &str) {
+        self.emit(&[0x0F, 0x85]);
         let off = self.text.len() as u32;
         self.emit_rel32(0);
         self.relocs.push((off, label.to_string()));
