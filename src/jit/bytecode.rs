@@ -66,12 +66,39 @@ pub enum Bytecode {
     ArrayGet,                 // Get array element
     ArraySet,                 // Set array element
     ArrayLen,                 // Get array length
+    ArrayPush,                // Push element to end of array
     Delete,                   // Delete object
+
+    // Map operations
+    MapNew,                   // Create new map
+    MapGet,                   // Get map value by key
+    MapPut,                   // Put key-value pair into map
+    MapContains,              // Check if map contains key
+    MapLen,                   // Get map size
+    MapRemove,                // Remove key from map
+    MapKeys,                  // Get all keys as array
+
+    // String operations
+    StringConcat,             // Concatenate two strings
+    StringLen,                // Get string length
+    StringEquals,             // Compare two strings for equality
 
     // Type operations
     Cast(u32),                // Cast to type
     InstanceOf(u32),          // Check instance of class
     TypeId,                   // Get type id
+    CheckNotNull,             // Assert top of stack is not null
+
+    // Float arithmetic (type-specific)
+    FAdd,                     // Float add
+    FSub,                     // Float subtract
+    FMul,                     // Float multiply
+    FDiv,                     // Float divide
+    FCmp,                     // Float compare (push -1/0/1)
+
+    // Optimized operations
+    IncLocal(u32, i32),       // Increment local variable (index, delta)
+    InvokeVirtual(u32, u32),  // Virtual method call (vtable_idx, argc)
 
     // Special
     Print,                    // Print top of stack
@@ -173,6 +200,10 @@ pub fn binop_to_bytecode(op: &BinaryOp) -> Bytecode {
         BinaryOp::BitXor => Bytecode::BitXor,
         BinaryOp::Shl => Bytecode::Shl,
         BinaryOp::Shr => Bytecode::Shr,
-        BinaryOp::NullCoalesce => Bytecode::Shr, // fallback: not directly supported
+        BinaryOp::NullCoalesce => {
+            // NullCoalesce is handled specially in compile_expr, not via binop_to_bytecode
+            // This should not be reached, but fallback to a no-op
+            Bytecode::Nop
+        }
     }
 }

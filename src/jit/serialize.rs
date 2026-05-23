@@ -139,9 +139,28 @@ fn write_instruction<W: Write>(writer: &mut W, instr: &Bytecode) -> Result<()> {
         Bytecode::ArraySet => 0x53,
         Bytecode::ArrayLen => 0x54,
         Bytecode::Delete => 0x55,
+        Bytecode::ArrayPush => 0x56,
+        Bytecode::MapNew => 0x57,
+        Bytecode::MapGet => 0x58,
+        Bytecode::MapPut => 0x59,
+        Bytecode::MapContains => 0x5A,
+        Bytecode::MapLen => 0x5B,
+        Bytecode::MapRemove => 0x5C,
+        Bytecode::MapKeys => 0x5D,
+        Bytecode::StringConcat => 0x5E,
+        Bytecode::StringLen => 0x5F,
+        Bytecode::StringEquals => 0x63,
+        Bytecode::CheckNotNull => 0x64,
         Bytecode::Cast(_) => 0x60,
         Bytecode::InstanceOf(_) => 0x61,
         Bytecode::TypeId => 0x62,
+        Bytecode::FAdd => 0x80,
+        Bytecode::FSub => 0x81,
+        Bytecode::FMul => 0x82,
+        Bytecode::FDiv => 0x83,
+        Bytecode::FCmp => 0x84,
+        Bytecode::IncLocal(_, _) => 0x90,
+        Bytecode::InvokeVirtual(_, _) => 0x91,
         Bytecode::Print => 0x70,
         Bytecode::Println => 0x71,
         Bytecode::Printf(_) => 0x72,
@@ -180,6 +199,14 @@ fn write_instruction<W: Write>(writer: &mut W, instr: &Bytecode) -> Result<()> {
         Bytecode::Cast(type_idx) => writer.write_all(&type_idx.to_le_bytes())?,
         Bytecode::InstanceOf(class_idx) => writer.write_all(&class_idx.to_le_bytes())?,
         Bytecode::Printf(argc) => writer.write_all(&argc.to_le_bytes())?,
+        Bytecode::IncLocal(idx, delta) => {
+            writer.write_all(&idx.to_le_bytes())?;
+            writer.write_all(&delta.to_le_bytes())?;
+        }
+        Bytecode::InvokeVirtual(vtable_idx, argc) => {
+            writer.write_all(&vtable_idx.to_le_bytes())?;
+            writer.write_all(&argc.to_le_bytes())?;
+        }
         _ => {}
     }
     
@@ -455,6 +482,16 @@ fn read_instruction<R: Read>(reader: &mut R) -> Result<Bytecode> {
         0x53 => Bytecode::ArraySet,
         0x54 => Bytecode::ArrayLen,
         0x55 => Bytecode::Delete,
+        0x56 => Bytecode::ArrayPush,
+        0x57 => Bytecode::MapNew,
+        0x58 => Bytecode::MapGet,
+        0x59 => Bytecode::MapPut,
+        0x5A => Bytecode::MapContains,
+        0x5B => Bytecode::MapLen,
+        0x5C => Bytecode::MapRemove,
+        0x5D => Bytecode::MapKeys,
+        0x5E => Bytecode::StringConcat,
+        0x5F => Bytecode::StringLen,
         0x60 => {
             reader.read_exact(&mut u32_buf)?;
             Bytecode::Cast(u32::from_le_bytes(u32_buf))
@@ -464,6 +501,8 @@ fn read_instruction<R: Read>(reader: &mut R) -> Result<Bytecode> {
             Bytecode::InstanceOf(u32::from_le_bytes(u32_buf))
         }
         0x62 => Bytecode::TypeId,
+        0x63 => Bytecode::StringEquals,
+        0x64 => Bytecode::CheckNotNull,
         0x70 => Bytecode::Print,
         0x71 => Bytecode::Println,
         0x72 => {
@@ -472,6 +511,26 @@ fn read_instruction<R: Read>(reader: &mut R) -> Result<Bytecode> {
         }
         0x73 => Bytecode::Halt,
         0x74 => Bytecode::Nop,
+        0x80 => Bytecode::FAdd,
+        0x81 => Bytecode::FSub,
+        0x82 => Bytecode::FMul,
+        0x83 => Bytecode::FDiv,
+        0x84 => Bytecode::FCmp,
+        0x90 => {
+            reader.read_exact(&mut u32_buf)?;
+            let idx = u32::from_le_bytes(u32_buf);
+            let mut i32_buf = [0u8; 4];
+            reader.read_exact(&mut i32_buf)?;
+            let delta = i32::from_le_bytes(i32_buf);
+            Bytecode::IncLocal(idx, delta)
+        }
+        0x91 => {
+            reader.read_exact(&mut u32_buf)?;
+            let vtable_idx = u32::from_le_bytes(u32_buf);
+            reader.read_exact(&mut u32_buf)?;
+            let argc = u32::from_le_bytes(u32_buf);
+            Bytecode::InvokeVirtual(vtable_idx, argc)
+        }
         _ => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unknown opcode: 0x{:02x}", opcode))),
     };
     

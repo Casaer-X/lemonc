@@ -49,8 +49,9 @@ impl BytecodeCompiler {
                     let idx = self.module.functions.len() as u32;
                     self.func_map.insert(f.name.clone(), idx);
                 }
-                Declaration::Enum(_) => {
-                    // TODO: Enum support
+                Declaration::Enum(e) => {
+                    // Compile enum as a class with variant constructors
+                    self.compile_enum(e);
                 }
                 _ => {}
             }
@@ -79,6 +80,162 @@ impl BytecodeCompiler {
         }
 
         self.module.clone()
+    }
+
+    fn compile_enum(&mut self, e: &EnumDecl) {
+        // Compile enum as a class with:
+        // - An int field for the ordinal value
+        // - A string field for the variant name
+        // - Static factory methods for each variant
+        let class_idx = self.module.classes.len() as u32;
+        self.class_indices.insert(e.name.clone(), class_idx);
+
+        let mut fields = vec!["_ordinal".to_string(), "_name".to_string()];
+        // Add variant data fields
+        for variant in &e.variants {
+            for (fi, field) in variant.fields.iter().enumerate() {
+                let field_name = field.name.clone()
+                    .unwrap_or_else(|| format!("_{}", fi));
+                fields.push(format!("_{}_{}", variant.name, field_name));
+            }
+        }
+
+        let mut field_map = HashMap::new();
+        for (i, field) in fields.iter().enumerate() {
+            field_map.insert(field.clone(), i as u32);
+        }
+        self.field_indices.insert(e.name.clone(), field_map);
+
+        let mut methods = Vec::new();
+        // Compile constructor
+        let ctor_idx = self.compile_enum_ctor(&e.name, &fields);
+        methods.push(ctor_idx);
+
+        // Compile variant factory methods
+        for variant in &e.variants {
+            let factory_idx = self.compile_enum_variant_factory(&e.name, variant, &e.variants);
+            methods.push(factory_idx);
+        }
+
+        self.module.classes.push(BytecodeClass {
+            name: e.name.clone(),
+            parent: None,
+            fields,
+            methods,
+            vtable: Vec::new(),
+        });
+    }
+
+    fn compile_enum_ctor(&mut self, enum_name: &str, fields: &[String]) -> u32 {
+        let mangled = format!("{}_ctor", enum_name);
+        let mut func = BytecodeFunction {
+            name: mangled.clone(),
+            params: vec!["self".to_string(), "_ordinal".to_string(), "_name".to_string()],
+            locals: 3,
+            code: Vec::new(),
+            is_static: false,
+            class_name: Some(enum_name.to_string()),
+        };
+
+        self.local_vars.push(HashMap::new());
+        self.local_types.push(HashMap::new());
+        self.label_positions.clear();
+        self.current_class = Some(enum_name.to_string());
+
+        self.local_vars.last_mut().unwrap().insert("self".to_string(), 0);
+        self.local_vars.last_mut().unwrap().insert("_ordinal".to_string(), 1);
+        self.local_vars.last_mut().unwrap().insert("_name".to_string(), 2);
+
+        // self._ordinal = ordinal
+        func.code.push(Bytecode::LoadLocal(0)); // self
+        func.code.push(Bytecode::LoadLocal(1)); // ordinal
+        func.code.push(Bytecode::StoreField(0));
+
+        // self._name = name
+        func.code.push(Bytecode::LoadLocal(0)); // self
+        func.code.push(Bytecode::LoadLocal(2)); // name
+        func.code.push(Bytecode::StoreField(1));
+
+        func.code.push(Bytecode::PushNull);
+        func.code.push(Bytecode::Return);
+
+        self.patch_all_labels(&mut func);
+
+        let idx = self.module.add_function(func);
+        self.func_map.insert(mangled, idx);
+
+        self.local_vars.pop();
+        self.local_types.pop();
+        self.current_class = None;
+        idx
+    }
+
+    fn compile_enum_variant_factory(
+        &mut self,
+        enum_name: &str,
+        variant: &EnumVariant,
+        all_variants: &[EnumVariant],
+    ) -> u32 {
+        let mangled = format!("{}_{}", enum_name, variant.name);
+        let param_count = variant.fields.len() as u32 + 2; // ordinal + name + data fields
+
+        let mut func = BytecodeFunction {
+            name: mangled.clone(),
+            params: vec![],
+            locals: 0,
+            code: Vec::new(),
+            is_static: true,
+            class_name: Some(enum_name.to_string()),
+        };
+
+        self.local_vars.push(HashMap::new());
+        self.local_types.push(HashMap::new());
+        self.label_positions.clear();
+        self.current_class = Some(enum_name.to_string());
+
+        // Find ordinal for this variant
+        let ordinal = all_variants.iter().position(|v| v.name == variant.name).unwrap_or(0) as i64;
+
+        // Create new enum instance
+        if let Some(&class_idx) = self.class_indices.get(enum_name) {
+            func.code.push(Bytecode::New(class_idx));
+        }
+
+        // Push ordinal
+        func.code.push(Bytecode::PushConst(ordinal));
+        // Push variant name
+        let name_idx = self.module.add_string(&variant.name);
+        func.code.push(Bytecode::PushString(name_idx));
+
+        // Push variant data fields
+        for (fi, field) in variant.fields.iter().enumerate() {
+            let local_idx = func.locals;
+            func.locals += 1;
+            let field_name = field.name.clone()
+                .unwrap_or_else(|| format!("_{}", fi));
+            self.local_vars.last_mut().unwrap().insert(field_name.clone(), local_idx);
+            func.params.push(field_name);
+            func.code.push(Bytecode::LoadLocal(local_idx));
+        }
+
+        // Call constructor
+        let ctor_mangled = format!("{}_ctor", enum_name);
+        if let Some(&idx) = self.func_map.get(&ctor_mangled) {
+            func.code.push(Bytecode::CallMethod(idx, param_count));
+            func.code.push(Bytecode::Pop); // pop ctor return
+        }
+
+        func.code.push(Bytecode::Return);
+
+        self.patch_all_labels(&mut func);
+
+        let idx = self.module.add_function(func);
+        self.func_map.insert(mangled, idx);
+
+        self.local_vars.pop();
+        self.local_types.pop();
+        self.current_class = None;
+        idx
     }
 
     fn compile_class(&mut self, c: &ClassDecl) {
@@ -355,14 +512,108 @@ impl BytecodeCompiler {
                     func.code.push(Bytecode::Jump(label));
                 }
             }
-            Stmt::ForEach(_, _, _, _) => {
-                // TODO: ForEach support
+            Stmt::ForEach(elem_type, elem_name, iterable, body) => {
+                // ForEach: for (Type name : iterable) { body }
+                // Compile as: get iterator, loop with hasNext/next
+                // Simplified: iterate using ArrayLen + ArrayGet
+                let iter_local = func.locals;
+                func.locals += 1; // array reference
+                let idx_local = func.locals;
+                func.locals += 1; // loop index
+                let elem_local = func.locals;
+                func.locals += 1; // element variable
+
+                // Store iterable
+                self.compile_expr(func, iterable);
+                func.code.push(Bytecode::StoreLocal(iter_local));
+                // Initialize index = 0
+                func.code.push(Bytecode::PushConst(0));
+                func.code.push(Bytecode::StoreLocal(idx_local));
+
+                let start_label = self.new_label();
+                let end_label = self.new_label();
+
+                self.break_labels.push(end_label);
+                self.continue_labels.push(start_label);
+
+                self.emit_label(func, start_label);
+                // Check: idx < array.length
+                func.code.push(Bytecode::LoadLocal(iter_local));
+                func.code.push(Bytecode::ArrayLen);
+                func.code.push(Bytecode::LoadLocal(idx_local));
+                func.code.push(Bytecode::Lt);
+                func.code.push(Bytecode::JumpIfNot(end_label));
+
+                // Get element: elem = array[idx]
+                func.code.push(Bytecode::LoadLocal(iter_local));
+                func.code.push(Bytecode::LoadLocal(idx_local));
+                func.code.push(Bytecode::ArrayGet);
+                func.code.push(Bytecode::StoreLocal(elem_local));
+
+                // Register element variable name
+                self.local_vars.last_mut().unwrap().insert(elem_name.clone(), elem_local);
+                if let TypeRef::Named(tn, _) = elem_type {
+                    self.local_types.last_mut().unwrap().insert(elem_name.clone(), tn.clone());
+                }
+
+                // Compile body
+                self.compile_stmt(func, body);
+
+                // Increment index
+                func.code.push(Bytecode::LoadLocal(idx_local));
+                func.code.push(Bytecode::PushConst(1));
+                func.code.push(Bytecode::Add);
+                func.code.push(Bytecode::StoreLocal(idx_local));
+                func.code.push(Bytecode::Jump(start_label));
+
+                self.emit_label(func, end_label);
+
+                self.break_labels.pop();
+                self.continue_labels.pop();
             }
-            Stmt::Switch(_, _, _) => {
-                // TODO: Switch support
+            Stmt::Switch(scrutinee, cases, default) => {
+                // Switch: compile scrutinee, then compare each case
+                self.compile_expr(func, scrutinee);
+                let end_label = self.new_label();
+                let mut case_labels = Vec::new();
+                let break_labels_backup = self.break_labels.clone();
+                self.break_labels.push(end_label);
+
+                for _ in cases {
+                    case_labels.push(self.new_label());
+                }
+
+                // Generate comparison chain
+                for (i, case) in cases.iter().enumerate() {
+                    for pattern in &case.patterns {
+                        func.code.push(Bytecode::Dup); // duplicate scrutinee
+                        self.compile_expr(func, pattern);
+                        func.code.push(Bytecode::Eq);
+                        func.code.push(Bytecode::JumpIf(case_labels[i]));
+                    }
+                }
+
+                // Default case
+                if let Some(default_block) = default {
+                    self.compile_block(func, default_block);
+                }
+                func.code.push(Bytecode::Jump(end_label));
+
+                // Case bodies
+                for (i, case) in cases.iter().enumerate() {
+                    self.emit_label(func, case_labels[i]);
+                    self.compile_block(func, &case.body);
+                    // Fall through to next case (no automatic break)
+                }
+
+                self.emit_label(func, end_label);
+                func.code.push(Bytecode::Pop); // pop scrutinee
+
+                self.break_labels = break_labels_backup;
             }
             Stmt::Try(_, _, _) => {
-                // TODO: Exception handling
+                // TODO: Exception handling - requires exception table support
+                // For now, skip try/catch/finally
             }
         }
     }
@@ -418,41 +669,163 @@ impl BytecodeCompiler {
                 }
             }
             Expr::BinaryOp(op, left, right) => {
-                self.compile_expr(func, left);
-                self.compile_expr(func, right);
-                func.code.push(binop_to_bytecode(op));
-            }
-            Expr::UnaryOp(op, operand) => {
-                self.compile_expr(func, operand);
-                match op {
-                    UnaryOp::Minus => func.code.push(Bytecode::Neg),
-                    UnaryOp::Not => func.code.push(Bytecode::Not),
-                    UnaryOp::BitNot => func.code.push(Bytecode::BitNot),
-                    _ => {}
+                if matches!(op, BinaryOp::NullCoalesce) {
+                    // a ?? b => if a != null then a else b
+                    self.compile_expr(func, left);
+                    func.code.push(Bytecode::Dup); // duplicate a
+                    let not_null_label = self.new_label();
+                    let end_label = self.new_label();
+                    func.code.push(Bytecode::JumpIf(not_null_label)); // if a is truthy, skip b
+                    func.code.push(Bytecode::Pop); // pop the duplicated a (it was null)
+                    self.compile_expr(func, right);
+                    func.code.push(Bytecode::Jump(end_label));
+                    self.emit_label(func, not_null_label);
+                    // a is not null, keep the duplicated value, pop the extra
+                    // Actually we have [a, a] on stack, we want just [a]
+                    func.code.push(Bytecode::Swap);
+                    func.code.push(Bytecode::Pop); // pop the second a, keep first
+                    self.emit_label(func, end_label);
+                } else {
+                    self.compile_expr(func, left);
+                    self.compile_expr(func, right);
+                    func.code.push(binop_to_bytecode(op));
                 }
             }
-            Expr::Assignment(target, value) => {
-                self.compile_expr(func, value);
-                match target.as_ref() {
-                    Expr::Variable(name) => {
-                        if let Some(idx) = self.local_vars.last().unwrap().get(name) {
-                            func.code.push(Bytecode::StoreLocal(*idx));
-                        } else if let Some(idx) = self.global_vars.get(name) {
-                            func.code.push(Bytecode::StoreGlobal(*idx));
-                        }
+            Expr::UnaryOp(op, operand) => {
+                match op {
+                    UnaryOp::Minus => {
+                        self.compile_expr(func, operand);
+                        func.code.push(Bytecode::Neg);
                     }
-                    Expr::FieldAccess(obj, field) => {
-                        self.compile_expr(func, obj);
-                        func.code.push(Bytecode::Swap);
-                        if let Some(class_name) = self.infer_class(obj) {
-                            if let Some(field_map) = self.field_indices.get(&class_name) {
-                                if let Some(&idx) = field_map.get(field) {
-                                    func.code.push(Bytecode::StoreField(idx));
+                    UnaryOp::Plus => {
+                        self.compile_expr(func, operand);
+                        // Plus is a no-op
+                    }
+                    UnaryOp::Not => {
+                        self.compile_expr(func, operand);
+                        func.code.push(Bytecode::Not);
+                    }
+                    UnaryOp::BitNot => {
+                        self.compile_expr(func, operand);
+                        func.code.push(Bytecode::BitNot);
+                    }
+                    UnaryOp::Deref => {
+                        self.compile_expr(func, operand);
+                        // Deref: treat pointer as the value itself (no-op in bytecode)
+                    }
+                    UnaryOp::AddressOf => {
+                        self.compile_expr(func, operand);
+                        // AddressOf: in bytecode, values are already references
+                    }
+                    UnaryOp::PreInc => {
+                        // ++x => x = x + 1; evaluate to new value
+                        if let Expr::Variable(name) = operand.as_ref() {
+                            if let Some(&idx) = self.local_vars.last().unwrap().get(name) {
+                                func.code.push(Bytecode::LoadLocal(idx));
+                                func.code.push(Bytecode::PushConst(1));
+                                func.code.push(Bytecode::Add);
+                                func.code.push(Bytecode::Dup);
+                                func.code.push(Bytecode::StoreLocal(idx));
+                            }
+                        } else if let Expr::FieldAccess(obj, field) = operand.as_ref() {
+                            self.compile_expr(func, obj);
+                            if let Some(class_name) = self.infer_class(obj) {
+                                if let Some(field_map) = self.field_indices.get(&class_name) {
+                                    if let Some(&idx) = field_map.get(field) {
+                                        func.code.push(Bytecode::Dup);
+                                        func.code.push(Bytecode::LoadField(idx));
+                                        func.code.push(Bytecode::PushConst(1));
+                                        func.code.push(Bytecode::Add);
+                                        func.code.push(Bytecode::StoreField(idx));
+                                    }
                                 }
                             }
                         }
                     }
-                    _ => {}
+                    UnaryOp::PreDec => {
+                        // --x => x = x - 1; evaluate to new value
+                        if let Expr::Variable(name) = operand.as_ref() {
+                            if let Some(&idx) = self.local_vars.last().unwrap().get(name) {
+                                func.code.push(Bytecode::LoadLocal(idx));
+                                func.code.push(Bytecode::PushConst(1));
+                                func.code.push(Bytecode::Sub);
+                                func.code.push(Bytecode::Dup);
+                                func.code.push(Bytecode::StoreLocal(idx));
+                            }
+                        } else if let Expr::FieldAccess(obj, field) = operand.as_ref() {
+                            self.compile_expr(func, obj);
+                            if let Some(class_name) = self.infer_class(obj) {
+                                if let Some(field_map) = self.field_indices.get(&class_name) {
+                                    if let Some(&idx) = field_map.get(field) {
+                                        func.code.push(Bytecode::Dup);
+                                        func.code.push(Bytecode::LoadField(idx));
+                                        func.code.push(Bytecode::PushConst(1));
+                                        func.code.push(Bytecode::Sub);
+                                        func.code.push(Bytecode::StoreField(idx));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    UnaryOp::PostInc => {
+                        // x++ => temp = x; x = x + 1; evaluate to temp
+                        if let Expr::Variable(name) = operand.as_ref() {
+                            if let Some(&idx) = self.local_vars.last().unwrap().get(name) {
+                                func.code.push(Bytecode::LoadLocal(idx));
+                                func.code.push(Bytecode::Dup);
+                                func.code.push(Bytecode::PushConst(1));
+                                func.code.push(Bytecode::Add);
+                                func.code.push(Bytecode::StoreLocal(idx));
+                            }
+                        }
+                    }
+                    UnaryOp::PostDec => {
+                        // x-- => temp = x; x = x - 1; evaluate to temp
+                        if let Expr::Variable(name) = operand.as_ref() {
+                            if let Some(&idx) = self.local_vars.last().unwrap().get(name) {
+                                func.code.push(Bytecode::LoadLocal(idx));
+                                func.code.push(Bytecode::Dup);
+                                func.code.push(Bytecode::PushConst(1));
+                                func.code.push(Bytecode::Sub);
+                                func.code.push(Bytecode::StoreLocal(idx));
+                            }
+                        }
+                    }
+                }
+            }
+            Expr::Assignment(target, value) => {
+                match target.as_ref() {
+                    Expr::ArrayAccess(arr, idx_expr) => {
+                        // ArraySet expects stack: [arr, idx, value] (pops value, idx, arr)
+                        self.compile_expr(func, arr);
+                        self.compile_expr(func, idx_expr);
+                        self.compile_expr(func, value);
+                        func.code.push(Bytecode::ArraySet);
+                    }
+                    _ => {
+                        self.compile_expr(func, value);
+                        match target.as_ref() {
+                            Expr::Variable(name) => {
+                                if let Some(idx) = self.local_vars.last().unwrap().get(name) {
+                                    func.code.push(Bytecode::StoreLocal(*idx));
+                                } else if let Some(idx) = self.global_vars.get(name) {
+                                    func.code.push(Bytecode::StoreGlobal(*idx));
+                                }
+                            }
+                            Expr::FieldAccess(obj, field) => {
+                                self.compile_expr(func, obj);
+                                func.code.push(Bytecode::Swap);
+                                if let Some(class_name) = self.infer_class(obj) {
+                                    if let Some(field_map) = self.field_indices.get(&class_name) {
+                                        if let Some(&idx) = field_map.get(field) {
+                                            func.code.push(Bytecode::StoreField(idx));
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             Expr::Call(callee, args) => {
@@ -511,7 +884,16 @@ impl BytecodeCompiler {
                             }
                         }
                     }
-                    _ => {}
+                    _ => {
+                        // Indirect call: compile callee as expression, push args
+                        // For now, compile callee and args but we can't do an indirect
+                        // call with current bytecode - push null as placeholder
+                        self.compile_expr(func, callee);
+                        for arg in args {
+                            self.compile_expr(func, arg);
+                        }
+                        func.code.push(Bytecode::PushNull);
+                    }
                 }
             }
             Expr::MethodCall(obj, method, args) => {
@@ -570,15 +952,29 @@ impl BytecodeCompiler {
                 self.compile_expr(func, obj);
                 func.code.push(Bytecode::Delete);
             }
-            Expr::Cast(_, inner) => {
+            Expr::Cast(target_type, inner) => {
                 self.compile_expr(func, inner);
+                // Use the Cast instruction with a type index from string pool
+                let type_idx = self.module.add_string(&format!("{:?}", target_type));
+                func.code.push(Bytecode::Cast(type_idx));
             }
-            Expr::InstanceOf(obj, _) => {
+            Expr::InstanceOf(obj, target_type) => {
                 self.compile_expr(func, obj);
-                func.code.push(Bytecode::PushBool(true));
+                let type_idx = self.module.add_string(&format!("{:?}", target_type));
+                func.code.push(Bytecode::InstanceOf(type_idx));
             }
-            Expr::Sizeof(_) => {
-                func.code.push(Bytecode::PushConst(8));
+            Expr::Sizeof(ty) => {
+                let size = match ty {
+                    TypeRef::Primitive(PrimitiveType::Int) => 8,
+                    TypeRef::Primitive(PrimitiveType::Float) => 8,
+                    TypeRef::Primitive(PrimitiveType::Double) => 8,
+                    TypeRef::Primitive(PrimitiveType::Bool) => 1,
+                    TypeRef::Primitive(PrimitiveType::Void) => 0,
+                    TypeRef::Named(_, _) => 8, // pointer size
+                    TypeRef::Array(_) => 16, // pointer + length
+                    _ => 8,
+                };
+                func.code.push(Bytecode::PushConst(size));
             }
             Expr::TypeId(obj) => {
                 self.compile_expr(func, obj);
@@ -609,9 +1005,75 @@ impl BytecodeCompiler {
                 self.compile_expr(func, e);
                 // TODO: Exception handling
             }
-            Expr::Match(_, _) => {
-                // TODO: Match expression support
+            Expr::Match(scrutinee, arms) => {
+                // Match expression: compile scrutinee, then check each arm
+                self.compile_expr(func, scrutinee);
+                let end_label = self.new_label();
+                let mut arm_labels = Vec::new();
+                for _ in arms {
+                    arm_labels.push(self.new_label());
+                }
+
+                for (i, arm) in arms.iter().enumerate() {
+                    match &arm.pattern {
+                        MatchPattern::Wildcard => {
+                            // Always matches - jump to this arm's body
+                            func.code.push(Bytecode::JumpIf(arm_labels[i]));
+                        }
+                        MatchPattern::Literal(lit) => {
+                            func.code.push(Bytecode::Dup);
+                            self.compile_expr(func, lit);
+                            func.code.push(Bytecode::Eq);
+                            func.code.push(Bytecode::JumpIf(arm_labels[i]));
+                        }
+                        MatchPattern::Variant(name, _bindings) => {
+                            // For enum variant matching, check TypeId
+                            func.code.push(Bytecode::Dup);
+                            let type_idx = self.module.add_string(name);
+                            func.code.push(Bytecode::InstanceOf(type_idx));
+                            func.code.push(Bytecode::JumpIf(arm_labels[i]));
+                        }
+                        MatchPattern::Or(patterns) => {
+                            for sub_pattern in patterns {
+                                match sub_pattern {
+                                    MatchPattern::Literal(lit) => {
+                                        func.code.push(Bytecode::Dup);
+                                        self.compile_expr(func, lit);
+                                        func.code.push(Bytecode::Eq);
+                                        func.code.push(Bytecode::JumpIf(arm_labels[i]));
+                                    }
+                                    MatchPattern::Variant(name, _) => {
+                                        func.code.push(Bytecode::Dup);
+                                        let type_idx = self.module.add_string(name);
+                                        func.code.push(Bytecode::InstanceOf(type_idx));
+                                        func.code.push(Bytecode::JumpIf(arm_labels[i]));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+                // No match - push null
+                func.code.push(Bytecode::Pop);
                 func.code.push(Bytecode::PushNull);
+                func.code.push(Bytecode::Jump(end_label));
+
+                // Compile each arm's body
+                for (i, arm) in arms.iter().enumerate() {
+                    self.emit_label(func, arm_labels[i]);
+                    // Pop the scrutinee (only if not already popped by wildcard)
+                    if !matches!(&arm.pattern, MatchPattern::Wildcard) {
+                        func.code.push(Bytecode::Pop);
+                    }
+                    match &arm.body {
+                        MatchBody::Expr(e) => self.compile_expr(func, e),
+                        MatchBody::Block(b) => self.compile_block(func, b),
+                    }
+                    func.code.push(Bytecode::Jump(end_label));
+                }
+
+                self.emit_label(func, end_label);
             }
         }
     }

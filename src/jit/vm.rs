@@ -13,6 +13,7 @@ pub enum VMValue {
     String(String),
     Object(Box<VMObject>),
     Array(Vec<VMValue>),
+    Map(Vec<(VMValue, VMValue)>),
     /// Raw pointer for native interop
     Ptr(*mut std::ffi::c_void),
 }
@@ -67,6 +68,7 @@ impl VMValue {
             VMValue::Null => false,
             VMValue::String(s) => !s.is_empty(),
             VMValue::Array(a) => !a.is_empty(),
+            VMValue::Map(m) => !m.is_empty(),
             VMValue::Ptr(p) => !p.is_null(),
             VMValue::Object(_) => true,
         }
@@ -519,6 +521,125 @@ impl LeVM {
             }
             Bytecode::Delete => {
                 self.stack.pop(); // Just pop for now
+            }
+            Bytecode::ArrayPush => {
+                let value = self.stack.pop().unwrap_or(VMValue::Null);
+                if let Some(VMValue::Array(mut arr)) = self.stack.pop() {
+                    arr.push(value);
+                    self.stack.push(VMValue::Array(arr));
+                }
+            }
+            Bytecode::MapNew => {
+                self.stack.push(VMValue::Map(Vec::new()));
+            }
+            Bytecode::MapGet => {
+                let key = self.stack.pop().unwrap_or(VMValue::Null);
+                if let Some(VMValue::Map(map)) = self.stack.pop() {
+                    let result = map.iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone()).unwrap_or(VMValue::Null);
+                    self.stack.push(result);
+                }
+            }
+            Bytecode::MapPut => {
+                let value = self.stack.pop().unwrap_or(VMValue::Null);
+                let key = self.stack.pop().unwrap_or(VMValue::Null);
+                if let Some(VMValue::Map(mut map)) = self.stack.pop() {
+                    if let Some(entry) = map.iter_mut().find(|(k, _)| *k == key) {
+                        entry.1 = value;
+                    } else {
+                        map.push((key, value));
+                    }
+                    self.stack.push(VMValue::Map(map));
+                }
+            }
+            Bytecode::MapContains => {
+                let key = self.stack.pop().unwrap_or(VMValue::Null);
+                if let Some(VMValue::Map(map)) = self.stack.pop() {
+                    self.stack.push(VMValue::Bool(map.iter().any(|(k, _)| *k == key)));
+                }
+            }
+            Bytecode::MapLen => {
+                if let Some(VMValue::Map(map)) = self.stack.pop() {
+                    self.stack.push(VMValue::Int(map.len() as i64));
+                }
+            }
+            Bytecode::MapRemove => {
+                let key = self.stack.pop().unwrap_or(VMValue::Null);
+                if let Some(VMValue::Map(mut map)) = self.stack.pop() {
+                    map.retain(|(k, _)| *k != key);
+                    self.stack.push(VMValue::Map(map));
+                }
+            }
+            Bytecode::MapKeys => {
+                if let Some(VMValue::Map(map)) = self.stack.pop() {
+                    let keys: Vec<VMValue> = map.iter().map(|(k, _)| k.clone()).collect();
+                    self.stack.push(VMValue::Array(keys));
+                }
+            }
+            Bytecode::StringConcat => {
+                let b = self.stack.pop().unwrap_or(VMValue::Null);
+                let a = self.stack.pop().unwrap_or(VMValue::Null);
+                self.stack.push(VMValue::String(format!("{}{}", a.as_string(), b.as_string())));
+            }
+            Bytecode::StringLen => {
+                if let Some(VMValue::String(s)) = self.stack.pop() {
+                    self.stack.push(VMValue::Int(s.len() as i64));
+                }
+            }
+            Bytecode::StringEquals => {
+                let b = self.stack.pop().unwrap_or(VMValue::Null);
+                let a = self.stack.pop().unwrap_or(VMValue::Null);
+                self.stack.push(VMValue::Bool(a.as_string() == b.as_string()));
+            }
+            Bytecode::CheckNotNull => {
+                // Assert top of stack is not null - just peek, don't pop
+                if let Some(v) = self.stack.last() {
+                    if *v == VMValue::Null {
+                        return Err("NullPointerException".to_string());
+                    }
+                }
+            }
+            Bytecode::FAdd => self.binop(|a, b| VMValue::Float(a.as_float() + b.as_float()))?,
+            Bytecode::FSub => self.binop(|a, b| VMValue::Float(a.as_float() - b.as_float()))?,
+            Bytecode::FMul => self.binop(|a, b| VMValue::Float(a.as_float() * b.as_float()))?,
+            Bytecode::FDiv => self.binop(|a, b| {
+                let divisor = b.as_float();
+                if divisor != 0.0 { VMValue::Float(a.as_float() / divisor) } else { VMValue::Float(0.0) }
+            })?,
+            Bytecode::FCmp => {
+                let b = self.stack.pop().ok_or("Stack underflow")?;
+                let a = self.stack.pop().ok_or("Stack underflow")?;
+                let cmp = a.as_float().partial_cmp(&b.as_float()).unwrap_or(std::cmp::Ordering::Equal);
+                self.stack.push(VMValue::Int(cmp as i64));
+            }
+            Bytecode::IncLocal(idx, delta) => {
+                if let Some(frame) = self.frames.last_mut() {
+                    while frame.locals.len() <= idx as usize {
+                        frame.locals.push(VMValue::Null);
+                    }
+                    let current = frame.locals[idx as usize].as_int();
+                    frame.locals[idx as usize] = VMValue::Int(current + delta as i64);
+                }
+            }
+            Bytecode::InvokeVirtual(vtable_idx, argc) => {
+                let mut args = Vec::new();
+                for _ in 0..argc {
+                    args.push(self.stack.pop().unwrap_or(VMValue::Null));
+                }
+                args.reverse();
+                // 'self' should be on stack - pop it
+                let self_obj = self.stack.pop().unwrap_or(VMValue::Null);
+                // Look up method from vtable
+                if let VMValue::Object(ref obj) = self_obj {
+                    if let Some(class) = self.module.classes.get(obj.class_idx as usize) {
+                        if let Some(&func_idx) = class.vtable.get(vtable_idx as usize) {
+                            let mut call_args = vec![self_obj];
+                            call_args.extend(args);
+                            self.call_function(func_idx, call_args)?;
+                            return Ok(());
+                        }
+                    }
+                }
+                self.stack.push(VMValue::Null);
             }
             Bytecode::Cast(_) => {
                 // TODO: Type casting - pass through for now
