@@ -59,6 +59,72 @@ class CCodeGen {
     private Map<String, Map<String, String> > classFieldElementTypeMap;  // className → (fieldName → elementCType)
     private Map<String, String> localVarElementTypes;       // varName → elementCType for local Array<T> vars
 
+    // Unified set of method/function names that return strings
+    private Array<String> stringReturningMethods;
+    private Array<String> stringReturningFunctions;
+
+    private void initStringReturningNames() {
+        this.stringReturningMethods = new Array<String>();
+        // String instance methods
+        this.stringReturningMethods.push("substring");
+        this.stringReturningMethods.push("toUpperCase");
+        this.stringReturningMethods.push("toLowerCase");
+        this.stringReturningMethods.push("trim");
+        this.stringReturningMethods.push("replace");
+        this.stringReturningMethods.push("concat");
+        this.stringReturningMethods.push("intToString");
+        this.stringReturningMethods.push("longToString");
+        this.stringReturningMethods.push("doubleToString");
+        this.stringReturningMethods.push("fromChar");
+        this.stringReturningMethods.push("fromCharArray");
+        this.stringReturningMethods.push("join");
+        this.stringReturningMethods.push("toString");
+        // CCodeGen internal methods
+        this.stringReturningMethods.push("ct");
+        this.stringReturningMethods.push("c_type");
+        this.stringReturningMethods.push("genExpr");
+        this.stringReturningMethods.push("escapeCString");
+        this.stringReturningMethods.push("mangled_generic_name");
+        this.stringReturningMethods.push("mangled_type_name");
+        this.stringReturningMethods.push("freshStringLiteral");
+        this.stringReturningMethods.push("freshExcVar");
+        this.stringReturningMethods.push("freshMatchVar");
+
+        this.stringReturningFunctions = new Array<String>();
+        this.stringReturningFunctions.push("String_concat");
+        this.stringReturningFunctions.push("String_intToString");
+        this.stringReturningFunctions.push("String_longToString");
+        this.stringReturningFunctions.push("String_doubleToString");
+        this.stringReturningFunctions.push("String_fromChar");
+        this.stringReturningFunctions.push("String_fromCharArray");
+        this.stringReturningFunctions.push("String_join");
+        this.stringReturningFunctions.push("String_substring");
+        this.stringReturningFunctions.push("String_substring_from");
+        this.stringReturningFunctions.push("String_substring_from_to");
+        this.stringReturningFunctions.push("String_toUpperCase");
+        this.stringReturningFunctions.push("String_toLowerCase");
+        this.stringReturningFunctions.push("String_trim");
+        this.stringReturningFunctions.push("String_replace");
+        this.stringReturningFunctions.push("String_escapeCString");
+        this.stringReturningFunctions.push("String_intToHex");
+        this.stringReturningFunctions.push("TokenKind_toString");
+        this.stringReturningFunctions.push("Character_toString");
+    }
+
+    private bool isStringReturningMethod(String name) {
+        for (int i = 0; i < this.stringReturningMethods.size(); i++) {
+            if (this.stringReturningMethods.get(i).equals(name)) return true;
+        }
+        return false;
+    }
+
+    private bool isStringReturningFunction(String name) {
+        for (int i = 0; i < this.stringReturningFunctions.size(); i++) {
+            if (this.stringReturningFunctions.get(i).equals(name)) return true;
+        }
+        return false;
+    }
+
     public CCodeGen() {
         this.output = new StringBuilder();
         this.indent = 0;
@@ -82,6 +148,7 @@ class CCodeGen {
         this.varMapValueTypes = new Map<String, String>();
         this.classFieldElementTypeMap = new Map<String, Map<String, String> >();
         this.localVarElementTypes = new Map<String, String>();
+        this.initStringReturningNames();
     }
 
     // ---- 主入口 ----
@@ -759,7 +826,14 @@ class CCodeGen {
         this.emitLineNoIndent("        int32_t oldCap = map->capacity; LemonMapEntry* oldEntries = map->entries;");
         this.emitLineNoIndent("        map->capacity = oldCap * 2; map->entries = (LemonMapEntry*)calloc(map->capacity, sizeof(LemonMapEntry)); map->size = 0;");
         this.emitLineNoIndent("        for (int32_t ri = 0; ri < oldCap; ri++) {");
-        this.emitLineNoIndent("            if (oldEntries[ri].occupied) { LemonMap_put(map, oldEntries[ri].key, oldEntries[ri].value); free(oldEntries[ri].key); }");
+        this.emitLineNoIndent("            if (oldEntries[ri].occupied) {");
+        this.emitLineNoIndent("                uint32_t nidx = _map_hash(oldEntries[ri].key) % map->capacity;");
+        this.emitLineNoIndent("                for (int32_t j = 0; j < map->capacity; j++) {");
+        this.emitLineNoIndent("                    if (!map->entries[nidx].occupied) { map->entries[nidx] = oldEntries[ri]; map->size++; break; }");
+        this.emitLineNoIndent("                    nidx = (nidx + 1) % map->capacity;");
+        this.emitLineNoIndent("                }");
+        this.emitLineNoIndent("                free(oldEntries[ri].key);");
+        this.emitLineNoIndent("            }");
         this.emitLineNoIndent("        }");
         this.emitLineNoIndent("        free(oldEntries);");
         this.emitLineNoIndent("    }");
@@ -2342,11 +2416,7 @@ class CCodeGen {
             }
         }
         if (expr.kind == ExprKind.MethodCall) {
-            String method = expr.strValue;
-            if (method.equals("substring") || method.equals("toUpperCase") || method.equals("toLowerCase")
-                || method.equals("trim") || method.equals("replace") || method.equals("concat")
-                || method.equals("intToString") || method.equals("longToString") || method.equals("doubleToString")
-                || method.equals("fromChar") || method.equals("fromCharArray") || method.equals("join")) {
+            if (this.isStringReturningMethod(expr.strValue)) {
                 return true;
             }
         }
@@ -2354,19 +2424,7 @@ class CCodeGen {
             // Call(FieldAccess(obj, method), args) - check if method returns string
             if (expr.callee != null && expr.callee.kind == ExprKind.FieldAccess) {
                 String method = expr.callee.strValue;
-                // Known string-returning methods
-                if (method.equals("intToString") || method.equals("longToString") || method.equals("doubleToString")
-                    || method.equals("toString") || method.equals("fromChar") || method.equals("fromCharArray")
-                    || method.equals("join") || method.equals("substring") || method.equals("toUpperCase")
-                    || method.equals("toLowerCase") || method.equals("trim") || method.equals("replace")
-                    || method.equals("concat")) {
-                    return true;
-                }
-                // Known string-returning methods on CCodeGen and other classes
-                if (method.equals("ct") || method.equals("c_type") || method.equals("genExpr")
-                    || method.equals("escapeCString") || method.equals("mangled_generic_name")
-                    || method.equals("mangled_type_name") || method.equals("freshStringLiteral")
-                    || method.equals("freshExcVar") || method.equals("freshMatchVar")) {
+                if (this.isStringReturningMethod(method)) {
                     return true;
                 }
                 // Check if the object is a String type
@@ -2375,23 +2433,11 @@ class CCodeGen {
                     return true;
                 }
             }
-            // Direct function call returning string: String_concat, String_intToString, etc.
+            // Direct function call returning string
             if (expr.callee != null && expr.callee.kind == ExprKind.Variable) {
                 String funcName = expr.callee.strValue;
-                if (funcName.startsWith("String_") || funcName.startsWith("StringBuilder_")
-                    || funcName.startsWith("TokenKind_") || funcName.startsWith("Character_")) {
-                    // String_concat, String_intToString, etc. return const char*
-                    if (funcName.equals("String_concat") || funcName.equals("String_intToString")
-                        || funcName.equals("String_longToString") || funcName.equals("String_doubleToString")
-                        || funcName.equals("String_fromChar") || funcName.equals("String_fromCharArray")
-                        || funcName.equals("String_join") || funcName.equals("String_substring")
-                        || funcName.equals("String_substring_from") || funcName.equals("String_substring_from_to")
-                        || funcName.equals("String_toUpperCase") || funcName.equals("String_toLowerCase")
-                        || funcName.equals("String_trim") || funcName.equals("String_replace")
-                        || funcName.equals("String_escapeCString") || funcName.equals("String_intToHex")
-                        || funcName.equals("TokenKind_toString") || funcName.equals("Character_toString")) {
-                        return true;
-                    }
+                if (this.isStringReturningFunction(funcName)) {
+                    return true;
                 }
             }
         }

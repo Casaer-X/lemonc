@@ -399,10 +399,42 @@ impl LeVM {
             Bytecode::Shr => self.binop(|a, b| VMValue::Int(a.as_int() >> b.as_int()))?,
             Bytecode::Eq => self.binop(|a, b| VMValue::Bool(a == b))?,
             Bytecode::Ne => self.binop(|a, b| VMValue::Bool(a != b))?,
-            Bytecode::Lt => self.binop(|a, b| VMValue::Bool(a.as_int() < b.as_int()))?,
-            Bytecode::Gt => self.binop(|a, b| VMValue::Bool(a.as_int() > b.as_int()))?,
-            Bytecode::Le => self.binop(|a, b| VMValue::Bool(a.as_int() <= b.as_int()))?,
-            Bytecode::Ge => self.binop(|a, b| VMValue::Bool(a.as_int() >= b.as_int()))?,
+            Bytecode::Lt => self.binop(|a, b| {
+                let result = match (&a, &b) {
+                    (VMValue::Float(fa), VMValue::Float(fb)) => *fa < *fb,
+                    (VMValue::Int(ia), VMValue::Float(fb)) => (*ia as f64) < *fb,
+                    (VMValue::Float(fa), VMValue::Int(ib)) => *fa < (*ib as f64),
+                    _ => a.as_int() < b.as_int(),
+                };
+                VMValue::Bool(result)
+            })?,
+            Bytecode::Gt => self.binop(|a, b| {
+                let result = match (&a, &b) {
+                    (VMValue::Float(fa), VMValue::Float(fb)) => *fa > *fb,
+                    (VMValue::Int(ia), VMValue::Float(fb)) => (*ia as f64) > *fb,
+                    (VMValue::Float(fa), VMValue::Int(ib)) => *fa > (*ib as f64),
+                    _ => a.as_int() > b.as_int(),
+                };
+                VMValue::Bool(result)
+            })?,
+            Bytecode::Le => self.binop(|a, b| {
+                let result = match (&a, &b) {
+                    (VMValue::Float(fa), VMValue::Float(fb)) => *fa <= *fb,
+                    (VMValue::Int(ia), VMValue::Float(fb)) => (*ia as f64) <= *fb,
+                    (VMValue::Float(fa), VMValue::Int(ib)) => *fa <= (*ib as f64),
+                    _ => a.as_int() <= b.as_int(),
+                };
+                VMValue::Bool(result)
+            })?,
+            Bytecode::Ge => self.binop(|a, b| {
+                let result = match (&a, &b) {
+                    (VMValue::Float(fa), VMValue::Float(fb)) => *fa >= *fb,
+                    (VMValue::Int(ia), VMValue::Float(fb)) => (*ia as f64) >= *fb,
+                    (VMValue::Float(fa), VMValue::Int(ib)) => *fa >= (*ib as f64),
+                    _ => a.as_int() >= b.as_int(),
+                };
+                VMValue::Bool(result)
+            })?,
             Bytecode::And => {
                 let b = self.stack.pop().unwrap_or(VMValue::Bool(false));
                 let a = self.stack.pop().unwrap_or(VMValue::Bool(false));
@@ -650,16 +682,76 @@ impl LeVM {
                 }
                 self.stack.push(VMValue::Null);
             }
-            Bytecode::Cast(_) => {
-                // TODO: Type casting - pass through for now
+            Bytecode::Cast(type_idx) => {
+                // Type casting: for numeric types, perform conversion; for objects, pass through
+                if let Some(v) = self.stack.pop() {
+                    let type_name = self.module.string_pool.get(type_idx as usize)
+                        .cloned()
+                        .unwrap_or_default();
+                    let result = match type_name.as_str() {
+                        "Int" | "int" | "i64" => VMValue::Int(v.as_int()),
+                        "Float" | "float" | "f64" | "Double" | "double" => {
+                            match v {
+                                VMValue::Int(n) => VMValue::Float(n as f64),
+                                VMValue::Float(f) => VMValue::Float(f),
+                                VMValue::Bool(b) => VMValue::Float(if b { 1.0 } else { 0.0 }),
+                                _ => VMValue::Float(0.0),
+                            }
+                        }
+                        "Bool" | "bool" => VMValue::Bool(v.is_truthy()),
+                        "String" | "string" => VMValue::String(v.as_string()),
+                        _ => v, // Object casts: pass through (runtime type checking would go here)
+                    };
+                    self.stack.push(result);
+                }
             }
-            Bytecode::InstanceOf(_) => {
-                // TODO: proper instanceof check
-                self.stack.push(VMValue::Bool(true));
+            Bytecode::InstanceOf(type_idx) => {
+                // Check if value is an instance of the given type
+                if let Some(v) = self.stack.pop() {
+                    let type_name = self.module.string_pool.get(type_idx as usize)
+                        .cloned()
+                        .unwrap_or_default();
+                    let result = match type_name.as_str() {
+                        "Int" | "int" | "i64" => matches!(v, VMValue::Int(_)),
+                        "Float" | "float" | "f64" | "Double" | "double" => matches!(v, VMValue::Float(_)),
+                        "Bool" | "bool" => matches!(v, VMValue::Bool(_)),
+                        "String" | "string" => matches!(v, VMValue::String(_)),
+                        "Null" => matches!(v, VMValue::Null),
+                        _ => {
+                            // For class types, check Object's class_idx against module classes
+                            match &v {
+                                VMValue::Object(obj) => {
+                                    // Look up the class name from the module
+                                    self.module.classes.get(obj.class_idx as usize)
+                                        .map(|c| c.name == type_name)
+                                        .unwrap_or(false)
+                                }
+                                _ => false,
+                            }
+                        }
+                    };
+                    self.stack.push(VMValue::Bool(result));
+                }
             }
             Bytecode::TypeId => {
-                // TODO: return actual type id
-                self.stack.push(VMValue::Int(0));
+                // Return a type identifier for the top value
+                if let Some(v) = self.stack.pop() {
+                    let type_id = match v {
+                        VMValue::Null => 0,
+                        VMValue::Int(_) => 1,
+                        VMValue::Float(_) => 2,
+                        VMValue::Bool(_) => 3,
+                        VMValue::String(_) => 4,
+                        VMValue::Ptr(_) => 5,
+                        VMValue::Object(ref obj) => {
+                            // Use class_idx as type ID (offset by 100 to distinguish from primitives)
+                            100 + obj.class_idx as i64
+                        }
+                        VMValue::Array(_) => 6,
+                        VMValue::Map(_) => 7,
+                    };
+                    self.stack.push(VMValue::Int(type_id));
+                }
             }
             Bytecode::Print => {
                 if let Some(v) = self.stack.pop() {
