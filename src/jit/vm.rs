@@ -1,4 +1,5 @@
 use crate::jit::bytecode::*;
+use crate::jit::jit_compiler::{JitCompiler, JitState, JitFunction};
 use std::collections::HashMap;
 use std::io::Cursor;
 
@@ -125,12 +126,18 @@ pub struct LeVM {
     jit_threshold: u64,
     /// Execution counts for hot-spot detection
     execution_counts: HashMap<u32, u64>,
+    /// JIT state: compiled functions and hot-spot tracking
+    jit_state: JitState,
+    /// JIT compiler instance
+    jit_compiler: JitCompiler,
 }
 
 impl LeVM {
     /// Create a new LeVM from a BytecodeModule
     pub fn new(module: BytecodeModule) -> Self {
         let num_globals = module.globals.len();
+        let mut jit_state = JitState::new();
+        jit_state.hot_threshold = 100;
         Self {
             module,
             stack: Vec::new(),
@@ -140,6 +147,8 @@ impl LeVM {
             native_functions: HashMap::new(),
             jit_threshold: 100,
             execution_counts: HashMap::new(),
+            jit_state,
+            jit_compiler: JitCompiler::new(),
         }
     }
 
@@ -750,6 +759,22 @@ impl LeVM {
             return Err(format!("Function {} not found", func_idx));
         }
 
+        // Hot-spot detection: increment execution count and trigger JIT if threshold reached
+        if self.jit_threshold > 0 {
+            let count = self.execution_counts.entry(func_idx).or_insert(0);
+            *count += 1;
+
+            if *count >= self.jit_threshold && !self.jit_state.is_compiled(func_idx) {
+                // Trigger JIT compilation for this hot function
+                let func = &self.module.functions[func_idx as usize];
+                if let Some(jit_func) = self.jit_compiler.compile_function(func, &self.module) {
+                    eprintln!("[JIT] Compiled hot function #{}: {} (executed {} times)",
+                        func_idx, func.name, count);
+                    self.jit_state.register_compiled(func_idx, jit_func);
+                }
+            }
+        }
+
         let func = &self.module.functions[func_idx as usize];
         let mut locals = vec![VMValue::Null; func.locals as usize];
 
@@ -768,6 +793,39 @@ impl LeVM {
         });
 
         Ok(())
+    }
+
+    /// Check if a function has been JIT compiled
+    pub fn is_jit_compiled(&self, func_idx: u32) -> bool {
+        self.jit_state.is_compiled(func_idx)
+    }
+
+    /// Get the JIT compiled function info
+    pub fn get_jit_function(&self, func_idx: u32) -> Option<&JitFunction> {
+        self.jit_state.get_compiled(func_idx)
+    }
+
+    /// Get execution count for a function
+    pub fn get_execution_count(&self, func_idx: u32) -> u64 {
+        *self.execution_counts.get(&func_idx).unwrap_or(&0)
+    }
+
+    /// Force JIT compilation of a specific function
+    pub fn force_jit_compile(&mut self, func_idx: u32) -> Result<(), String> {
+        if func_idx as usize >= self.module.functions.len() {
+            return Err(format!("Function {} not found", func_idx));
+        }
+        if self.jit_state.is_compiled(func_idx) {
+            return Ok(()); // Already compiled
+        }
+        let func = &self.module.functions[func_idx as usize];
+        match self.jit_compiler.compile_function(func, &self.module) {
+            Some(jit_func) => {
+                self.jit_state.register_compiled(func_idx, jit_func);
+                Ok(())
+            }
+            None => Err(format!("Failed to JIT compile function {}", func.name)),
+        }
     }
 }
 
