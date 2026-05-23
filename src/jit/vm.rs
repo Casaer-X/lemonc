@@ -1,8 +1,10 @@
 use crate::jit::bytecode::*;
 use std::collections::HashMap;
+use std::io::Cursor;
 
 /// VM Value types
 #[derive(Debug, Clone, PartialEq)]
+#[repr(C)]
 pub enum VMValue {
     Null,
     Int(i64),
@@ -11,13 +13,20 @@ pub enum VMValue {
     String(String),
     Object(Box<VMObject>),
     Array(Vec<VMValue>),
+    /// Raw pointer for native interop
+    Ptr(*mut std::ffi::c_void),
 }
+
+// Allow VMValue::Ptr to be sent between threads safely
+unsafe impl Send for VMValue {}
+unsafe impl Sync for VMValue {}
 
 impl VMValue {
     pub fn as_int(&self) -> i64 {
         match self {
             VMValue::Int(v) => *v,
             VMValue::Bool(b) => if *b { 1 } else { 0 },
+            VMValue::Ptr(p) => *p as i64,
             _ => 0,
         }
     }
@@ -58,17 +67,36 @@ impl VMValue {
             VMValue::Null => false,
             VMValue::String(s) => !s.is_empty(),
             VMValue::Array(a) => !a.is_empty(),
-            _ => true,
+            VMValue::Ptr(p) => !p.is_null(),
+            VMValue::Object(_) => true,
         }
+    }
+
+    pub fn as_ptr(&self) -> *mut std::ffi::c_void {
+        match self {
+            VMValue::Ptr(p) => *p,
+            VMValue::Int(v) => *v as *mut std::ffi::c_void,
+            VMValue::Null => std::ptr::null_mut(),
+            _ => std::ptr::null_mut(),
+        }
+    }
+
+    pub fn from_ptr(p: *mut std::ffi::c_void) -> Self {
+        VMValue::Ptr(p)
     }
 }
 
 /// VM Object
 #[derive(Debug, Clone, PartialEq)]
+#[repr(C)]
 pub struct VMObject {
     pub class_idx: u32,
     pub fields: Vec<VMValue>,
 }
+
+/// Native function type: takes an array of VMValues, returns a VMValue
+/// Uses C calling convention for FFI compatibility
+pub type LeNativeFunc = extern "C" fn(args: *const VMValue, argc: usize) -> VMValue;
 
 /// Call frame
 #[derive(Debug)]
@@ -79,16 +107,26 @@ struct CallFrame {
     stack_base: usize,
 }
 
-/// Virtual Machine
-pub struct VM {
+/// Lemon Embedded Virtual Machine
+///
+/// Can be created from a .lmb file or from in-memory bytecode data.
+/// Supports registering native functions for AOT↔VM interop.
+pub struct LeVM {
     module: BytecodeModule,
     stack: Vec<VMValue>,
     frames: Vec<CallFrame>,
     globals: Vec<VMValue>,
     halted: bool,
+    /// Registered native functions (name → function pointer)
+    native_functions: HashMap<String, LeNativeFunc>,
+    /// JIT compilation threshold (0 = disabled)
+    jit_threshold: u64,
+    /// Execution counts for hot-spot detection
+    execution_counts: HashMap<u32, u64>,
 }
 
-impl VM {
+impl LeVM {
+    /// Create a new LeVM from a BytecodeModule
     pub fn new(module: BytecodeModule) -> Self {
         let num_globals = module.globals.len();
         Self {
@@ -97,14 +135,41 @@ impl VM {
             frames: Vec::new(),
             globals: vec![VMValue::Null; num_globals],
             halted: false,
+            native_functions: HashMap::new(),
+            jit_threshold: 100,
+            execution_counts: HashMap::new(),
         }
     }
 
-    /// 获取模块的不可变引用
+    /// Create a LeVM from raw .lmb bytes (for embedded use)
+    pub fn from_bytes(lmb_data: &[u8]) -> Result<Self, String> {
+        let mut cursor = Cursor::new(lmb_data);
+        let module = crate::jit::serialize::read_module(&mut cursor)
+            .map_err(|e| e.to_string())?;
+        Ok(Self::new(module))
+    }
+
+    /// Get a reference to the bytecode module
     pub fn module_ref(&self) -> &BytecodeModule {
         &self.module
     }
 
+    /// Register a native function that can be called from bytecode
+    pub fn register_native(&mut self, name: &str, func: LeNativeFunc) {
+        self.native_functions.insert(name.to_string(), func);
+    }
+
+    /// Check if a native function is registered
+    pub fn has_native(&self, name: &str) -> bool {
+        self.native_functions.contains_key(name)
+    }
+
+    /// Set the JIT compilation threshold (0 to disable)
+    pub fn set_jit_threshold(&mut self, threshold: u64) {
+        self.jit_threshold = threshold;
+    }
+
+    /// Run the entry point function
     pub fn run(&mut self) -> Result<VMValue, String> {
         let entry = self.module.entry_point;
         self.call_function(entry, Vec::new())?;
@@ -114,6 +179,50 @@ impl VM {
         }
 
         Ok(self.stack.pop().unwrap_or(VMValue::Null))
+    }
+
+    /// Call a specific function by index with arguments
+    ///
+    /// This is the primary interface for native code to call into the VM.
+    pub fn call(&mut self, func_idx: u32, args: Vec<VMValue>) -> Result<VMValue, String> {
+        self.halted = false;
+        self.call_function(func_idx, args)?;
+
+        while !self.halted && !self.frames.is_empty() {
+            self.step()?;
+        }
+
+        Ok(self.stack.pop().unwrap_or(VMValue::Null))
+    }
+
+    /// Call a function by name
+    pub fn call_by_name(&mut self, name: &str, args: Vec<VMValue>) -> Result<VMValue, String> {
+        for (idx, func) in self.module.functions.iter().enumerate() {
+            if func.name == name {
+                return self.call(idx as u32, args);
+            }
+        }
+        Err(format!("Function '{}' not found", name))
+    }
+
+    /// Find a function index by name
+    pub fn find_function(&self, name: &str) -> Option<u32> {
+        for (idx, func) in self.module.functions.iter().enumerate() {
+            if func.name == name {
+                return Some(idx as u32);
+            }
+        }
+        None
+    }
+
+    /// Reset the VM state (clear stack, frames, globals)
+    pub fn reset(&mut self) {
+        self.stack.clear();
+        self.frames.clear();
+        for g in self.globals.iter_mut() {
+            *g = VMValue::Null;
+        }
+        self.halted = false;
     }
 
     fn step(&mut self) -> Result<(), String> {
@@ -139,8 +248,12 @@ impl VM {
         let instr = func.code[pc].clone();
         self.frames[frame_idx].pc = pc + 1;
 
-        // Debug: print instruction and stack
-        // eprintln!("  [{:3}] {:?} | stack: {:?}", pc, instr, self.stack);
+        // Hot-spot detection
+        if self.jit_threshold > 0 {
+            let count = self.execution_counts.entry(func_idx).or_insert(0);
+            *count += 1;
+            // Future: trigger JIT compilation when count >= threshold
+        }
 
         match instr {
             Bytecode::PushConst(v) => self.stack.push(VMValue::Int(v)),
@@ -337,6 +450,27 @@ impl VM {
                 }
                 self.call_function(func_idx, args)?;
             }
+            Bytecode::CallNative(name_idx) => {
+                // Look up the native function name from the string pool
+                let name = self.module.string_pool.get(name_idx as usize)
+                    .cloned()
+                    .unwrap_or_default();
+                if let Some(&native_func) = self.native_functions.get(&name) {
+                    // Pop argc from stack, then pop that many args
+                    let argc = self.stack.pop()
+                        .and_then(|v| if let VMValue::Int(n) = v { Some(n as usize) } else { None })
+                        .unwrap_or(0);
+                    let mut args = Vec::with_capacity(argc);
+                    for _ in 0..argc {
+                        args.push(self.stack.pop().unwrap_or(VMValue::Null));
+                    }
+                    args.reverse();
+                    let result = native_func(args.as_ptr(), args.len());
+                    self.stack.push(result);
+                } else {
+                    return Err(format!("Native function '{}' not registered", name));
+                }
+            }
             Bytecode::Return => {
                 let ret_val = self.stack.pop().unwrap_or(VMValue::Null);
                 self.frames.pop();
@@ -387,12 +521,14 @@ impl VM {
                 self.stack.pop(); // Just pop for now
             }
             Bytecode::Cast(_) => {
-                // TODO: Type casting
+                // TODO: Type casting - pass through for now
             }
             Bytecode::InstanceOf(_) => {
+                // TODO: proper instanceof check
                 self.stack.push(VMValue::Bool(true));
             }
             Bytecode::TypeId => {
+                // TODO: return actual type id
                 self.stack.push(VMValue::Int(0));
             }
             Bytecode::Print => {
@@ -406,7 +542,6 @@ impl VM {
                 }
             }
             Bytecode::Printf(argc) => {
-                // printf(format, ...args) - format string with %d, %s, etc.
                 let mut args = Vec::new();
                 for _ in 0..argc {
                     if let Some(v) = self.stack.pop() {
@@ -415,7 +550,7 @@ impl VM {
                 }
                 args.reverse();
                 if let Some(format_val) = args.get(0) {
-                    let mut format_str = format_val.as_string();
+                    let format_str = format_val.as_string();
                     let mut arg_idx = 1;
                     let mut result = String::new();
                     let mut chars = format_str.chars().peekable();
@@ -514,3 +649,6 @@ impl VM {
         Ok(())
     }
 }
+
+/// Backward compatibility: VM is now an alias for LeVM
+pub type VM = LeVM;

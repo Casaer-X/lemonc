@@ -1,4 +1,4 @@
-use lemonc::jit::{read_module, VM, JitCompiler, JitState};
+use lemonc::jit::{read_module, LeVM, JitCompiler, JitState};
 use std::env;
 use std::fs::File;
 
@@ -6,7 +6,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        eprintln!("Lemon VM (lemonvm) v1.0.0 - JIT Runtime");
+        eprintln!("Lemon VM (lemonvm) v1.7.0 - JIT Runtime");
         eprintln!("Usage: lemonvm <file.lmb> [options]");
         eprintln!("Options:");
         eprintln!("  --debug       Print bytecode before execution");
@@ -21,7 +21,6 @@ fn main() {
     let no_jit = args.contains(&"--no-jit".to_string());
     let jit_enabled = !no_jit;
 
-    // 解析 JIT 阈值
     let mut jit_threshold = 100u64;
     if let Some(pos) = args.iter().position(|a| a == "--jit-threshold") {
         if let Some(val) = args.get(pos + 1) {
@@ -71,7 +70,7 @@ fn main() {
         println!();
     }
 
-    // 初始化 JIT 状态
+    // Initialize JIT state
     let mut jit_state = JitState::new();
     jit_state.enabled = jit_enabled;
     jit_state.hot_threshold = jit_threshold;
@@ -79,7 +78,6 @@ fn main() {
     if jit_enabled {
         println!("JIT compilation enabled (threshold: {})", jit_threshold);
 
-        // 预编译短函数
         let jit_compiler = JitCompiler::new();
         for (i, func) in module.functions.iter().enumerate() {
             if func.code.len() < 50 {
@@ -93,8 +91,9 @@ fn main() {
         println!("JIT compilation disabled");
     }
 
-    println!("Executing in VM...");
-    let mut vm = VM::new(module);
+    println!("Executing in LeVM...");
+    let mut vm = LeVM::new(module);
+    vm.set_jit_threshold(jit_threshold);
 
     match vm.run() {
         Ok(result) => {

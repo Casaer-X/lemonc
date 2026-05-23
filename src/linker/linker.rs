@@ -180,6 +180,53 @@ impl PeLinker {
         self.entry_point = name.to_string();
     }
 
+    /// Add embedded .lmb bytecode data as a custom PE section (.lmb).
+    ///
+    /// The data will be placed in a read-only section with two exported symbols:
+    /// - `_lmb_data_start` → points to the beginning of the bytecode
+    /// - `_lmb_data_size`  → the size in bytes (as a 32-bit value in .rdata)
+    ///
+    /// This allows native code to reference the embedded bytecode at runtime:
+    /// ```c
+    /// extern const uint8_t _lmb_data_start[];
+    /// extern const uint32_t _lmb_data_size;
+    /// LeVM* vm = le_vm_create(_lmb_data_start, _lmb_data_size);
+    /// ```
+    pub fn add_embedded_lmb(&mut self, lmb_data: &[u8]) {
+        // Add the .lmb section with the bytecode data
+        // Characteristics: IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ
+        // = 0x00000040 | 0x40000000 = 0x40000040
+        self.merged_sections.push(MergedSection {
+            name: ".lmb".to_string(),
+            characteristics: 0x40000040, // CNT_INITIALIZED_DATA | MEM_READ
+            data: lmb_data.to_vec(),
+            symbols: vec![("_lmb_data_start".to_string(), 0)],
+            relocs: Vec::new(),
+        });
+
+        // Add the size constant in .rdata
+        let rdata = if let Some(pos) = self.merged_sections.iter().position(|s| s.name == ".rdata") {
+            &mut self.merged_sections[pos]
+        } else {
+            self.merged_sections.push(MergedSection {
+                name: ".rdata".to_string(),
+                characteristics: 0x40000040,
+                data: Vec::new(),
+                symbols: Vec::new(),
+                relocs: Vec::new(),
+            });
+            self.merged_sections.last_mut().unwrap()
+        };
+
+        let size_offset = align_up(rdata.data.len() as u32, 4);
+        if size_offset > rdata.data.len() as u32 {
+            rdata.data.extend(std::iter::repeat(0u8).take((size_offset - rdata.data.len() as u32) as usize));
+        }
+        let size_offset = rdata.data.len() as u32;
+        rdata.data.extend_from_slice(&(lmb_data.len() as u32).to_le_bytes());
+        rdata.symbols.push(("_lmb_data_size".to_string(), size_offset));
+    }
+
     pub fn add_object(&mut self, data: &[u8]) -> Result<(), String> {
         let coff = CoffFile::parse(data)?;
         self.merge_coff(&coff)
@@ -191,6 +238,7 @@ impl PeLinker {
             (".data", ".data"),
             (".rdata", ".rdata"),
             (".bss", ".bss"),
+            (".lmb", ".lmb"),
         ]
         .iter()
         .cloned()

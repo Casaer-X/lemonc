@@ -131,6 +131,7 @@ fn write_instruction<W: Write>(writer: &mut W, instr: &Bytecode) -> Result<()> {
         Bytecode::JumpIfNot(_) => 0x42,
         Bytecode::Call(_, _) => 0x43,
         Bytecode::CallMethod(_, _) => 0x44,
+        Bytecode::CallNative(_) => 0x46,
         Bytecode::Return => 0x45,
         Bytecode::New(_) => 0x50,
         Bytecode::NewArray => 0x51,
@@ -171,6 +172,9 @@ fn write_instruction<W: Write>(writer: &mut W, instr: &Bytecode) -> Result<()> {
         Bytecode::CallMethod(func_idx, argc) => {
             writer.write_all(&func_idx.to_le_bytes())?;
             writer.write_all(&argc.to_le_bytes())?;
+        }
+        Bytecode::CallNative(name_idx) => {
+            writer.write_all(&name_idx.to_le_bytes())?;
         }
         Bytecode::New(class_idx) => writer.write_all(&class_idx.to_le_bytes())?,
         Bytecode::Cast(type_idx) => writer.write_all(&type_idx.to_le_bytes())?,
@@ -436,6 +440,10 @@ fn read_instruction<R: Read>(reader: &mut R) -> Result<Bytecode> {
             reader.read_exact(&mut u32_buf)?;
             let argc = u32::from_le_bytes(u32_buf);
             Bytecode::CallMethod(func_idx, argc)
+        }
+        0x46 => {
+            reader.read_exact(&mut u32_buf)?;
+            Bytecode::CallNative(u32::from_le_bytes(u32_buf))
         }
         0x45 => Bytecode::Return,
         0x50 => {

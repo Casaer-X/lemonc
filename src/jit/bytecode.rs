@@ -57,6 +57,7 @@ pub enum Bytecode {
     JumpIfNot(u32),           // Jump if top of stack is false
     Call(u32, u32),           // Call function (func_idx, argc)
     CallMethod(u32, u32),     // Call method (method_idx, argc)
+    CallNative(u32),          // Call registered native function by name index
     Return,                   // Return from function
 
     // Object operations
